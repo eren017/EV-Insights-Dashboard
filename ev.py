@@ -1,14 +1,17 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
 import joblib
+from catboost import Pool
 from openai import OpenAI
 
 # ------------------------------------------------------------------
 # PAGE CONFIG
 # ------------------------------------------------------------------
 st.set_page_config(
-    page_title="EV Insights",
+    page_title="EV Adoption Intelligence",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -16,121 +19,98 @@ st.set_page_config(
 
 # ------------------------------------------------------------------
 # THEME TOKENS — dark luxury BI: black canvas, neon mint accent
+# (same system as EV Insights v1 — colors pull from Streamlit's own
+# theme in .streamlit/config.toml, this stylesheet layers cards/type on top)
 # ------------------------------------------------------------------
 INK = "#0B0B0B"
 CARD_GLASS = "rgba(255,255,255,0.035)"
-CARD_SOLID = "#111417"          # solid near-black used for Plotly backgrounds
+CARD_SOLID = "#111417"
 BORDER_MINT = "rgba(82,242,198,0.22)"
 MINT = "#52F2C6"
 MINT_DIM = "#2FBE97"
 WHITE = "#FFFFFF"
 GRAY_LIGHT = "#B8BCC4"
 GRAY_MID = "#6B7280"
-GRAY_DIM = "#3A3F47"
-ORANGE = "#FF8C42"              # reserved strictly for highlighting / negative signal
+ORANGE = "#FF8C42"
 
 st.markdown(f"""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
     html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; }}
-
-    .stApp {{
-        background: radial-gradient(circle at top, #121517 0%, {INK} 55%);
-    }}
+    .stApp {{ background: radial-gradient(circle at top, #121517 0%, {INK} 55%); }}
     .block-container {{ padding-top: 1.4rem; padding-bottom: 2rem; max-width: 1360px; }}
     header[data-testid="stHeader"] {{ background: transparent; }}
     #MainMenu, footer {{ visibility: hidden; }}
 
-    /* ================= SIDEBAR — control panel ================= */
     section[data-testid="stSidebar"] {{
-        background-color: {INK};
-        border-right: 1px solid {BORDER_MINT};
+        background-color: {INK}; border-right: 1px solid {BORDER_MINT};
         box-shadow: inset -50px 0 70px -60px rgba(82,242,198,0.15);
     }}
     section[data-testid="stSidebar"] .block-container {{ padding: 1.6rem 1.1rem; }}
-    section[data-testid="stSidebar"] h3 {{
-        color: {WHITE} !important; font-weight: 800; letter-spacing: .02em;
-    }}
+    section[data-testid="stSidebar"] h3 {{ color: {WHITE} !important; font-weight: 800; }}
     section[data-testid="stSidebar"] label, section[data-testid="stSidebar"] .stCaption,
     section[data-testid="stSidebar"] p {{ color: {GRAY_LIGHT} !important; font-weight: 600; }}
 
-    /* ================= dashboard-card / sidebar-card / filter-card =================
-       Streamlit can't accept custom class= on its native container, so these three
-       conceptual classes share one rule bound to the bordered-container testid. */
-    .dashboard-card,
-    [data-testid="stVerticalBlockBorderWrapper"] {{
-        background: {CARD_GLASS} !important;
-        backdrop-filter: blur(14px);
-        -webkit-backdrop-filter: blur(14px);
-        border: 1px solid {BORDER_MINT} !important;
-        border-radius: 22px !important;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.55) !important;
-        padding: 8px !important;
-        transition: box-shadow 0.25s ease, transform 0.25s ease;
+    .dashboard-card, [data-testid="stVerticalBlockBorderWrapper"] {{
+        background: {CARD_GLASS} !important; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+        border: 1px solid {BORDER_MINT} !important; border-radius: 22px !important;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.55) !important; padding: 8px !important;
+        transition: box-shadow 0.25s ease; overflow: visible !important;
     }}
     [data-testid="stVerticalBlockBorderWrapper"]:hover {{
         box-shadow: 0 10px 40px rgba(82,242,198,0.12), 0 0 0 1px {BORDER_MINT} !important;
     }}
-    /* sidebar-card / filter-card variant: tighter radius, sits on black not glass */
     section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"] {{
-        background: rgba(255,255,255,0.02) !important;
-        border-radius: 18px !important;
-        margin-bottom: 14px;
+        background: rgba(255,255,255,0.02) !important; border-radius: 18px !important;
+        margin-bottom: 14px; padding: 14px 14px 20px 14px !important;
     }}
     [data-testid="stForm"] {{
-        background: {CARD_GLASS} !important;
-        backdrop-filter: blur(14px);
-        border: 1px solid {BORDER_MINT} !important;
-        border-radius: 22px !important;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.55) !important;
-        padding: 22px !important;
+        background: {CARD_GLASS} !important; backdrop-filter: blur(14px);
+        border: 1px solid {BORDER_MINT} !important; border-radius: 22px !important;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.55) !important; padding: 22px !important;
     }}
-    [data-testid="stVerticalBlockBorderWrapper"] label,
-    [data-testid="stForm"] label {{ color: {WHITE} !important; }}
+    [data-testid="stVerticalBlockBorderWrapper"] label, [data-testid="stForm"] label {{ color: {WHITE} !important; }}
 
-    /* ================= form widgets: remove default Streamlit chrome ================= */
-    .stSelectbox > div > div, .stMultiSelect > div > div,
-    .stNumberInput > div > div, .stTextArea textarea, [data-baseweb="input"] {{
-        background-color: rgba(255,255,255,0.05) !important;
-        border: 1px solid {BORDER_MINT} !important;
-        border-radius: 12px !important;
-        color: {WHITE} !important;
+    .stSelectbox > div > div, .stMultiSelect > div > div, .stNumberInput > div > div,
+    .stTextArea textarea, [data-baseweb="input"] {{
+        background-color: rgba(255,255,255,0.05) !important; border: 1px solid {BORDER_MINT} !important;
+        border-radius: 12px !important; color: {WHITE} !important;
     }}
-    .stSelectbox > div > div:focus-within, .stNumberInput > div > div:focus-within,
-    .stTextArea textarea:focus {{
+    .stSelectbox > div > div:focus-within, .stNumberInput > div > div:focus-within {{
         border-color: {MINT} !important; box-shadow: 0 0 0 3px rgba(82,242,198,0.18) !important;
     }}
 
-    /* multiselect pills — glass mint */
-    div[data-baseweb="tag"] {{
-        background-color: rgba(82,242,198,0.15) !important;
-        border: 1px solid rgba(82,242,198,0.45) !important;
+    .stMultiSelect [data-baseweb="tag"] {{
+        background-color: rgba(82,242,198,0.18) !important; border: 1px solid rgba(82,242,198,0.5) !important;
         border-radius: 999px !important;
     }}
-    div[data-baseweb="tag"] span {{ color: {MINT} !important; font-weight: 700; }}
+    .stMultiSelect [data-baseweb="tag"] span, .stMultiSelect [data-baseweb="tag"] * {{ color: {MINT} !important; font-weight: 700; }}
+    .stMultiSelect [data-baseweb="tag"] svg {{ fill: {MINT} !important; }}
 
-    /* sliders — mint track + glowing thumb */
-    .stSlider [data-baseweb="slider"] > div > div {{ background: {MINT} !important; }}
+    .stSlider, .stSelectSlider {{ overflow: visible !important; padding-top: 6px; margin-bottom: 6px; }}
     .stSlider [role="slider"] {{
         background-color: {MINT} !important; border: 3px solid {INK} !important;
         box-shadow: 0 0 10px rgba(82,242,198,0.7) !important;
     }}
-    .stSelectSlider [data-baseweb="slider"] > div > div {{ background: {MINT} !important; }}
+    [data-testid="stThumbValue"] {{
+        opacity: 1 !important; visibility: visible !important; background-color: {MINT} !important;
+        color: {INK} !important; font-weight: 800 !important; border-radius: 8px !important; padding: 2px 9px !important;
+    }}
+    [data-testid="stTickBarMin"], [data-testid="stTickBarMax"] {{ color: {GRAY_LIGHT} !important; }}
 
-    /* ================= buttons — filled mint pill CTA ================= */
     .stButton>button, [data-testid="stFormSubmitButton"] button, [data-testid="stDownloadButton"] button {{
-        background-color: {MINT} !important; color: {INK} !important;
-        border-radius: 999px !important; font-weight: 800 !important; border: none !important;
-        padding: 0.55rem 1.4rem !important;
+        background-color: {MINT} !important; color: {INK} !important; border-radius: 999px !important;
+        font-weight: 800 !important; border: none !important; padding: 0.55rem 1.4rem !important;
         transition: box-shadow 0.2s ease, transform 0.2s ease;
     }}
-    .stButton>button:hover, [data-testid="stFormSubmitButton"] button:hover,
-    [data-testid="stDownloadButton"] button:hover {{
+    .stButton>button *, [data-testid="stFormSubmitButton"] button * {{ color: {INK} !important; }}
+    .stButton>button:hover, [data-testid="stFormSubmitButton"] button:hover {{
         box-shadow: 0 0 22px rgba(82,242,198,0.55) !important; transform: translateY(-1px);
     }}
 
-    /* ================= nav-pill (tabs) ================= */
-    .nav-pill, .stTabs [data-baseweb="tab-list"] {{ gap: 10px; border-bottom: none; margin-bottom: 22px; flex-wrap: wrap; }}
+    .stTabs [data-baseweb="tab-list"] {{ gap: 10px; border-bottom: none; margin-bottom: 22px; flex-wrap: wrap; }}
+    .stTabs [data-baseweb="tab-highlight"] {{ display: none !important; }}
+    .stTabs [data-baseweb="tab-border"] {{ display: none !important; }}
     .stTabs [data-baseweb="tab"] {{
         height: 42px; background-color: rgba(255,255,255,0.03); border-radius: 999px;
         color: {MINT}; font-weight: 700; padding: 0 22px; border: 1px solid {BORDER_MINT};
@@ -142,48 +122,29 @@ st.markdown(f"""
         box-shadow: 0 0 18px rgba(82,242,198,0.4) !important;
     }}
 
-    /* ================= metric-card (KPI cards) ================= */
     .metric-card {{
-        position: relative;
-        background: {CARD_GLASS};
-        backdrop-filter: blur(14px);
-        border: 1px solid {BORDER_MINT};
-        border-left: 4px solid {MINT};
-        border-radius: 20px;
-        padding: 18px 20px;
-        min-height: 128px;
-        box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+        position: relative; background: {CARD_GLASS}; backdrop-filter: blur(14px);
+        border: 1px solid {BORDER_MINT}; border-left: 4px solid {MINT}; border-radius: 20px;
+        padding: 18px 20px; min-height: 118px; box-shadow: 0 8px 28px rgba(0,0,0,0.5);
         transition: transform 0.25s ease, box-shadow 0.25s ease;
     }}
-    .metric-card:hover {{
-        transform: translateY(-5px);
-        box-shadow: 0 16px 40px rgba(82,242,198,0.18), 0 0 0 1px {BORDER_MINT};
-    }}
-    .metric-icon {{ font-size: 1.3rem; margin-bottom: 6px; opacity: 0.9; }}
-    .metric-label {{
-        color: {GRAY_LIGHT}; font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
-        letter-spacing: .08em; margin-bottom: 6px;
-    }}
-    .metric-value {{ color: {WHITE}; font-size: 1.9rem; font-weight: 900; line-height: 1.1; }}
-    .metric-sub {{ color: {MINT}; font-size: 0.75rem; margin-top: 6px; font-weight: 700; }}
+    .metric-card:hover {{ transform: translateY(-5px); box-shadow: 0 16px 40px rgba(82,242,198,0.18), 0 0 0 1px {BORDER_MINT}; }}
+    .metric-icon {{ font-size: 1.2rem; margin-bottom: 6px; color: {MINT}; font-weight: 900; }}
+    .metric-icon.neg {{ color: {ORANGE}; }}
+    .metric-label {{ color: {GRAY_LIGHT}; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }}
+    .metric-value {{ color: {WHITE}; font-size: 1.8rem; font-weight: 900; line-height: 1.1; }}
+    .metric-sub {{ color: {MINT}; font-size: 0.74rem; margin-top: 6px; font-weight: 700; }}
     .metric-sub.neg {{ color: {ORANGE}; }}
 
-    /* ================= chart-card title ================= */
-    .chart-card-title {{
-        color: {WHITE}; font-size: 0.98rem; font-weight: 700; margin: 8px 0 10px 10px;
-        letter-spacing: .01em;
-    }}
+    .chart-card-title {{ color: {WHITE}; font-size: 0.98rem; font-weight: 700; margin: 8px 0 10px 10px; }}
     .chart-card-title span {{ color: {MINT}; }}
 
-    /* ================= typography ================= */
-    .hero-title {{
-        font-size: 2.3rem; font-weight: 900; color: {WHITE}; letter-spacing: -0.01em; margin-bottom: 4px;
-    }}
+    .hero-title {{ font-size: 2.2rem; font-weight: 900; color: {WHITE}; letter-spacing: -0.01em; margin-bottom: 4px; }}
     .hero-title span {{ color: {MINT}; }}
     .hero-sub {{ color: {GRAY_MID}; font-size: 0.95rem; margin-bottom: 14px; font-weight: 500; }}
 
-    .navbar {{ display: flex; align-items: center; justify-content: space-between; padding: 6px 4px 20px 4px; margin-bottom: 4px; }}
-    .navbar-brand {{ font-size: 1.6rem; font-weight: 900; color: {WHITE}; letter-spacing: -0.01em; }}
+    .navbar {{ display: flex; align-items: center; justify-content: space-between; padding: 6px 4px 20px 4px; }}
+    .navbar-brand {{ font-size: 1.6rem; font-weight: 900; color: {WHITE}; }}
     .navbar-brand span {{ color: {MINT}; }}
     .navbar-sub {{ color: {GRAY_MID}; font-size: 0.82rem; font-weight: 600; }}
 
@@ -192,52 +153,90 @@ st.markdown(f"""
         border: 1px solid {BORDER_MINT}; border-radius: 999px; padding: 5px 16px;
         font-size: 0.8rem; font-weight: 700; margin-bottom: 18px;
     }}
-
-    /* alerts / dataframe polish */
-    .stAlert {{
-        background-color: rgba(255,255,255,0.04) !important; border-radius: 16px !important;
-        border: 1px solid {BORDER_MINT} !important; color: {WHITE} !important;
+    .model-page-pill {{
+        display: inline-block; background: rgba(255,140,66,0.1); color: {ORANGE};
+        border: 1px solid rgba(255,140,66,0.35); border-radius: 999px; padding: 5px 16px;
+        font-size: 0.8rem; font-weight: 700; margin-bottom: 18px;
     }}
+
+    .stAlert {{ background-color: rgba(255,255,255,0.04) !important; border-radius: 16px !important; border: 1px solid {BORDER_MINT} !important; color: {WHITE} !important; }}
     .stProgress > div > div > div > div {{ background-color: {MINT} !important; }}
     [data-testid="stDataFrame"] {{ border-radius: 16px; overflow: hidden; border: 1px solid {BORDER_MINT}; }}
+
+    .verdict-badge {{
+        display: inline-block; padding: 10px 22px; border-radius: 999px; font-weight: 900;
+        font-size: 1.1rem; margin-bottom: 10px;
+    }}
+    .verdict-high {{ background: {MINT}; color: {INK}; box-shadow: 0 0 24px rgba(82,242,198,0.5); }}
+    .verdict-medium {{ background: {MINT_DIM}; color: {INK}; box-shadow: 0 0 24px rgba(47,190,151,0.4); }}
+    .verdict-low {{ background: {ORANGE}; color: {INK}; box-shadow: 0 0 24px rgba(255,140,66,0.4); }}
+
+    .factor-row {{
+        display: flex; justify-content: space-between; padding: 10px 14px; border-radius: 12px;
+        background: rgba(255,255,255,0.03); margin-bottom: 8px; border-left: 3px solid {MINT};
+    }}
+    .factor-row.neg {{ border-left-color: {ORANGE}; }}
+    .factor-name {{ color: {WHITE}; font-weight: 600; font-size: 0.88rem; }}
+    .factor-impact {{ font-weight: 800; font-size: 0.88rem; }}
+    .factor-impact.pos {{ color: {MINT}; }}
+    .factor-impact.negimpact {{ color: {ORANGE}; }}
 </style>
 """, unsafe_allow_html=True)
 
 ACCENT = MINT
-# Neutral categorical palette (no rainbow) — mint / grays, cycling
 PALETTE_NEUTRAL = [MINT, GRAY_LIGHT, MINT_DIM, GRAY_MID]
-# Binary good/concern palette — mint = positive, orange = the one highlighted concern
-PALETTE_BINARY = [ORANGE, MINT]        # order matches ["No","Yes"] alpha-sort used by groupby
-# 3-level severity palette (Low/Medium/High) — orange only highlights the "High" concern
 PALETTE_SEVERITY = [GRAY_MID, MINT_DIM, ORANGE]
 PLOT_TEMPLATE = "plotly_dark"
 CH = 300
+TARGET = "ev_adoption_likelihood"
+TARGET_ORDER = ["Low", "Medium", "High"]
+TARGET_COLORS = {"Low": GRAY_MID, "Medium": MINT_DIM, "High": MINT}
 
 # ------------------------------------------------------------------
-# DATA + MODEL LOADING
+# DATA + MODEL
 # ------------------------------------------------------------------
 @st.cache_data
 def load_data():
-    df = pd.read_csv("EV_Adoption_and_Range_Anxiety_Dataset.csv")
-    df["Annual_Income_USD"] = df["Annual_Income_USD"].fillna(df["Annual_Income_USD"].median())
-    df["Daily_Commute_km"] = df["Daily_Commute_km"].fillna(df["Daily_Commute_km"].median())
-    df["Environmental_Concern_Level"] = df["Environmental_Concern_Level"].fillna(
-        df["Environmental_Concern_Level"].median()
+    df = pd.read_csv("global_ev_adoption_behavior_2026.csv")
+    df["education_level"] = df["education_level"].fillna("Unknown")
+    df["charging_station_accessibility"] = df["charging_station_accessibility"].fillna(
+        df["charging_station_accessibility"].median()
     )
-    df["Range_Anxiety_Rank"] = df["Range_Anxiety_Level"].map({"Low": 0, "Medium": 1, "High": 2})
+    df["ev_knowledge_score"] = df["ev_knowledge_score"].fillna(df["ev_knowledge_score"].median())
+
     df["Income_Bracket"] = pd.cut(
-        df["Annual_Income_USD"], bins=[0, 40000, 70000, 100000, 150000, float("inf")],
-        labels=["<40k", "40k-70k", "70k-100k", "100k-150k", "150k+"]
+        df["annual_income"], bins=[0, 25000, 40000, 60000, 90000, float("inf")],
+        labels=["<25k", "25k-40k", "40k-60k", "60k-90k", "90k+"]
     )
     df["Age_Group"] = pd.cut(
-        df["Age"], bins=[0, 25, 35, 45, 55, 65, 120],
+        df["age"], bins=[0, 25, 35, 45, 55, 65, 120],
         labels=["18-25", "26-35", "36-45", "46-55", "56-65", "65+"]
     )
+
+    def band(s):
+        return pd.cut(s, bins=[0, 3, 7, 10], labels=["Low", "Medium", "High"], include_lowest=True)
+
+    df["Env_Awareness_Band"] = band(df["environmental_awareness_score"])
+    df["Tech_Affinity_Band"] = band(df["technology_affinity_score"])
+    df["Gov_Incentive_Band"] = band(df["government_incentive_awareness"])
+    df["Charging_Access_Band"] = band(df["charging_station_accessibility"])
+    df["Range_Anxiety_Band"] = band(df["range_anxiety_score"])
+    df["Distance_Band"] = pd.cut(
+        df["nearest_charging_station_km"], bins=[-0.1, 2, 5, 10, float("inf")],
+        labels=["<2 km", "2-5 km", "5-10 km", "10+ km"]
+    )
+
+    # same two derived features used in the Prediction page's model input,
+    # added here as real columns so the AI Assistant can summarize them too
+    df["awareness_composite"] = df[
+        ["environmental_awareness_score", "technology_affinity_score", "government_incentive_awareness"]
+    ].mean(axis=1)
+    df["anxiety_minus_knowledge"] = df["range_anxiety_score"] - df["ev_knowledge_score"]
     return df
 
 @st.cache_resource
 def load_model():
-    return joblib.load("ev_xgboost.pkl")
+    return joblib.load("best_ev_adoption_model.pkl")
 
 @st.cache_resource
 def load_llm_client():
@@ -246,381 +245,470 @@ def load_llm_client():
 df = load_data()
 model = load_model()
 client = load_llm_client()
+CLASS_MAP = {0: "Low", 1: "Medium", 2: "High"}
 
-# ------------------------------------------------------------------
-# UI HELPERS
-# ------------------------------------------------------------------
 def kpi(col, icon, label, value, sub=None, sub_neg=False):
     sub_html = f"<div class='metric-sub{' neg' if sub_neg else ''}'>{sub}</div>" if sub else ""
+    icon_cls = "metric-icon neg" if sub_neg else "metric-icon"
     col.markdown(
-        f"""<div class="metric-card">
-            <div class="metric-icon">{icon}</div>
-            <div class="metric-label">{label}</div>
-            <div class="metric-value">{value}</div>{sub_html}</div>""",
+        f"""<div class="metric-card"><div class="{icon_cls}">{icon}</div>
+        <div class="metric-label">{label}</div><div class="metric-value">{value}</div>{sub_html}</div>""",
         unsafe_allow_html=True,
     )
 
 def chart_layout(fig, height=CH, **kw):
-    fig.update_layout(
-        paper_bgcolor=CARD_SOLID, plot_bgcolor=CARD_SOLID,
-        font_color=GRAY_LIGHT, height=height,
-        margin=dict(t=10, b=10, l=10, r=10), **kw
-    )
+    fig.update_layout(paper_bgcolor=CARD_SOLID, plot_bgcolor=CARD_SOLID, font_color=GRAY_LIGHT,
+                       height=height, margin=dict(t=10, b=10, l=10, r=10), **kw)
     return fig
 
-def purchase_rate_by(data, col, title, order=None, color_seq=PALETTE_NEUTRAL):
+def stacked_mix_chart(data, col, title, order=None, key=None):
     with st.container(border=True):
         st.markdown(f'<div class="chart-card-title">{title}</div>', unsafe_allow_html=True)
         if data.empty:
             st.info("No records match the current filters.")
             return
-        tmp = data.groupby(col, observed=True)["Will_Buy_EV"].apply(lambda s: (s == "Yes").mean() * 100)
+        ct = pd.crosstab(data[col], data["ev_adoption_likelihood"], normalize="index")[TARGET_ORDER] * 100
         if order:
-            tmp = tmp.reindex(order)
-        tmp = tmp.reset_index()
-        tmp.columns = [col, "Rate (%)"]
-        fig = px.bar(tmp, x=col, y="Rate (%)", text="Rate (%)", color=col,
-                     color_discrete_sequence=color_seq, template=PLOT_TEMPLATE)
+            ct = ct.reindex(order)
+        fig = go.Figure()
+        for t in TARGET_ORDER:
+            fig.add_bar(name=t, x=ct.index.astype(str), y=ct[t], marker_color=TARGET_COLORS[t])
+        fig.update_layout(barmode="stack", legend_title="")
+        fig = chart_layout(fig)
+        st.plotly_chart(fig, use_container_width=True, key=key or f"mix_{col}")
+
+def adoption_rate_by_band(data, col, title, order=("Low", "Medium", "High"), key=None):
+    with st.container(border=True):
+        st.markdown(f'<div class="chart-card-title">{title}</div>', unsafe_allow_html=True)
+        if data.empty:
+            st.info("No records match the current filters.")
+            return
+        tmp = data.groupby(col, observed=True)["ev_adoption_likelihood"].apply(lambda s: (s == "High").mean() * 100)
+        tmp = tmp.reindex(order).reset_index()
+        tmp.columns = [col, "High Adoption Rate (%)"]
+        fig = px.bar(tmp, x=col, y="High Adoption Rate (%)", text="High Adoption Rate (%)",
+                     color=col, color_discrete_sequence=PALETTE_SEVERITY, template=PLOT_TEMPLATE)
         fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
         fig = chart_layout(fig, showlegend=False)
-        st.plotly_chart(fig, use_container_width=True, key=f"chart_{col}_{title}")
+        st.plotly_chart(fig, use_container_width=True, key=key or f"band_{col}")
 
-def page_header(title, subtitle):
+def page_header(title, subtitle, model_page=False):
     parts = title.split(" ")
     accented = f'{" ".join(parts[:-1])} <span>{parts[-1]}</span>' if len(parts) > 1 else f'<span>{title}</span>'
     st.markdown(f'<div class="hero-title">{accented}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="hero-sub">{subtitle}</div>', unsafe_allow_html=True)
-    pct = len(fdf) / len(df) * 100 if len(df) else 0
-    st.markdown(
-        f'<div class="filter-pill">◆ {len(fdf):,} of {len(df):,} buyers in view ({pct:.0f}%) — via sidebar filters</div>',
-        unsafe_allow_html=True,
-    )
+    if model_page:
+        st.markdown('<div class="model-page-pill">◆ Model-level view — sidebar filters do not apply here</div>', unsafe_allow_html=True)
+    else:
+        pct = len(fdf) / len(df) * 100 if len(df) else 0
+        st.markdown(
+            f'<div class="filter-pill">◆ {len(fdf):,} of {len(df):,} respondents in view ({pct:.0f}%) — via sidebar filters</div>',
+            unsafe_allow_html=True,
+        )
 
 # ------------------------------------------------------------------
-# SIDEBAR — control panel, grouped filter cards with icons
+# SIDEBAR — lean filter set, business pages only
 # ------------------------------------------------------------------
 with st.sidebar:
-    st.markdown("### ⚙ Control Panel")
-    st.caption("Filters apply across every page — charts, KPIs, and the AI Assistant.")
+    st.markdown("### ⚙ Filters")
+    st.caption("Apply to Home, Demographics, Charging & EV Insights only — not to Feature Importance or Prediction.")
 
     with st.container(border=True):
-        city_f = st.multiselect("🏙 City Type", sorted(df["City_Type"].unique()), default=sorted(df["City_Type"].unique()))
-        anxiety_f = st.multiselect("⚠ Range Anxiety", ["Low", "Medium", "High"], default=["Low", "Medium", "High"])
+        city_f = st.multiselect("🏙 City Type", sorted(df["city_type"].unique()), default=sorted(df["city_type"].unique()))
+        edu_f = st.multiselect("🎓 Education Level", sorted(df["education_level"].unique()), default=sorted(df["education_level"].unique()))
 
     with st.container(border=True):
-        subsidy_f = st.select_slider("💰 Subsidy Available", options=["All", "Yes", "No"], value="All")
-        home_charge_f = st.select_slider("🔌 Home Charging Possible", options=["All", "Yes", "No"], value="All")
-
-    with st.container(border=True):
-        age_f = st.slider("🎂 Age Range", int(df["Age"].min()), int(df["Age"].max()),
-                           (int(df["Age"].min()), int(df["Age"].max())))
-        income_f = st.slider("💵 Annual Income (USD)", int(df["Annual_Income_USD"].min()), int(df["Annual_Income_USD"].max()),
-                              (int(df["Annual_Income_USD"].min()), int(df["Annual_Income_USD"].max())), step=1000)
+        income_f = st.select_slider(
+            "💵 Income Bracket", options=["<25k", "25k-40k", "40k-60k", "60k-90k", "90k+"],
+            value=("<25k", "90k+")
+        )
 
     if st.button("↺ Reset All Filters", use_container_width=True):
         st.rerun()
 
-# ---- Apply filters once, reuse everywhere as `fdf` ----
+income_order = ["<25k", "25k-40k", "40k-60k", "60k-90k", "90k+"]
+lo_idx, hi_idx = income_order.index(income_f[0]), income_order.index(income_f[1])
+income_range = income_order[lo_idx:hi_idx + 1]
+
 fdf = df[
-    df["City_Type"].isin(city_f)
-    & df["Range_Anxiety_Level"].isin(anxiety_f)
-    & df["Age"].between(*age_f)
-    & df["Annual_Income_USD"].between(*income_f)
+    df["city_type"].isin(city_f)
+    & df["education_level"].isin(edu_f)
+    & df["Income_Bracket"].isin(income_range)
 ]
-if subsidy_f != "All":
-    fdf = fdf[fdf["Subsidy_Available"] == subsidy_f]
-if home_charge_f != "All":
-    fdf = fdf[fdf["Home_Charging_Possible"] == home_charge_f]
 
 # ------------------------------------------------------------------
 # NAVBAR
 # ------------------------------------------------------------------
 st.markdown(f"""
 <div class="navbar">
-    <div class="navbar-brand">⚡ EV<span>Insights</span></div>
-    <div class="navbar-sub">EV Adoption & Range Anxiety · Executive Dashboard</div>
+    <div class="navbar-brand">⚡ EV Adoption<span> Intelligence</span></div>
+    <div class="navbar-sub">Powered by CatBoost · 50,000 respondents</div>
 </div>
 """, unsafe_allow_html=True)
 
-tab_home, tab_demo, tab_charge, tab_buy, tab_predict, tab_ai, tab_data = st.tabs([
-    "🏠 Home", "👥 Demographics", "🔌 Charging", "🛒 Buying",
-    "🤖 Prediction", "💬 AI Assistant", "📄 Explore Data"
+tab_home, tab_demo, tab_charge, tab_insights, tab_importance, tab_predict, tab_ai = st.tabs([
+    "🏠 Home", "👥 Demographics", "🔌 Charging Infrastructure",
+    "🚗 EV Insights", "🧠 Feature Importance", "🤖 Prediction", "💬 AI Assistant"
 ])
-
-if fdf.empty:
-    st.warning("⚠️ No records match your current sidebar filters — widen them to see data on any page.")
 
 # ==================================================================
 # PAGE 1: HOME
 # ==================================================================
 with tab_home:
-    page_header("EV Adoption Overview", "A snapshot of who buys electric vehicles — and what holds the rest back.")
+    page_header("Executive Overview", "The state of EV adoption across your surveyed population, at a glance.")
 
     if not fdf.empty:
-        buy_rate = (fdf["Will_Buy_EV"] == "Yes").mean() * 100
-        avg_income = fdf["Annual_Income_USD"].mean()
-        high_anxiety_pct = (fdf["Range_Anxiety_Level"] == "High").mean() * 100
-        home_charge_pct = (fdf["Home_Charging_Possible"] == "Yes").mean() * 100
+        adoption_rate = (fdf["ev_adoption_likelihood"] == "High").mean() * 100
+        high_anxiety_pct = (fdf["range_anxiety_score"] >= 7).mean() * 100
+        home_charge_pct = fdf["home_charging_available"].mean() * 100
+        avg_income = fdf["annual_income"].mean()
+        avg_knowledge = fdf["ev_knowledge_score"].mean()
 
-        k1, k2, k3, k4, k5 = st.columns(5)
-        kpi(k1, "👥", "Buyers in View", f"{len(fdf):,}")
-        kpi(k2, "⚡", "Will Buy an EV", f"{buy_rate:.1f}%")
-        kpi(k3, "💵", "Avg Annual Income", f"${avg_income:,.0f}")
-        kpi(k4, "⚠", "High Range Anxiety", f"{high_anxiety_pct:.1f}%",
-            "Biggest adoption blocker" if high_anxiety_pct > 20 else None, sub_neg=True)
-        kpi(k5, "🔌", "Home Charging Access", f"{home_charge_pct:.1f}%")
+        k1, k2, k3, k4, k5, k6 = st.columns(6)
+        kpi(k1, "◆", "Total Respondents", f"{len(fdf):,}")
+        kpi(k2, "▲", "EV Adoption Rate", f"{adoption_rate:.1f}%", "Share rated 'High' likelihood")
+        kpi(k3, "!", "High Range Anxiety", f"{high_anxiety_pct:.1f}%", "Score ≥ 7 / 10", sub_neg=True)
+        kpi(k4, "●", "Home Charging Access", f"{home_charge_pct:.1f}%")
+        kpi(k5, "$", "Avg Annual Income", f"${avg_income:,.0f}")
+        kpi(k6, "◈", "Avg EV Knowledge Score", f"{avg_knowledge:.1f} / 10")
 
         st.markdown("<br>", unsafe_allow_html=True)
-        c1, c2, c3 = st.columns(3)
+        c1, c2 = st.columns([1, 1])
         with c1:
             with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Purchase Decision Split</div>', unsafe_allow_html=True)
-                tmp = fdf["Will_Buy_EV"].value_counts().reset_index()
-                tmp.columns = ["Decision", "Count"]
-                fig = px.pie(tmp, names="Decision", values="Count", hole=0.62,
-                             color="Decision", color_discrete_map={"Yes": MINT, "No": ORANGE},
-                             template=PLOT_TEMPLATE)
+                st.markdown('<div class="chart-card-title">Adoption Likelihood Split</div>', unsafe_allow_html=True)
+                tmp = fdf["ev_adoption_likelihood"].value_counts().reindex(TARGET_ORDER).reset_index()
+                tmp.columns = ["Likelihood", "Count"]
+                fig = px.pie(tmp, names="Likelihood", values="Count", hole=0.62,
+                             color="Likelihood", color_discrete_map=TARGET_COLORS, template=PLOT_TEMPLATE)
                 fig.update_traces(textinfo="percent+label")
-                fig = chart_layout(fig, showlegend=False)
+                fig = chart_layout(fig, showlegend=False, height=320)
                 st.plotly_chart(fig, use_container_width=True, key="home_pie")
         with c2:
-            purchase_rate_by(fdf, "Range_Anxiety_Level", "Purchase Rate by Range Anxiety",
-                              order=["Low", "Medium", "High"], color_seq=PALETTE_SEVERITY)
-        with c3:
-            purchase_rate_by(fdf, "City_Type", "Purchase Rate by City Type")
+            with st.container(border=True):
+                st.markdown('<div class="chart-card-title">What Actually Separates Adopters From Skeptics</div>', unsafe_allow_html=True)
+                compare_cols = {
+            "EV Knowledge": "ev_knowledge_score",
+            "Awareness Composite": "awareness_composite",
+            "Range Anxiety (lower = better)": "range_anxiety_score",
+            "Anxiety − Knowledge Gap (lower = better)": "anxiety_minus_knowledge",
+        }
+        rows = []
+        for label, col in compare_cols.items():
+            high_val = fdf.loc[fdf.ev_adoption_likelihood == "High", col].mean()
+            low_val = fdf.loc[fdf.ev_adoption_likelihood == "Low", col].mean()
+            rows.append({"Factor": label, "High Adopters": high_val, "Low Adopters": low_val})
+        comp_df = pd.DataFrame(rows)
+        fig = go.Figure()
+        fig.add_bar(name="High Adopters", y=comp_df["Factor"], x=comp_df["High Adopters"],
+                    orientation="h", marker_color=MINT)
+        fig.add_bar(name="Low Adopters", y=comp_df["Factor"], x=-comp_df["Low Adopters"],
+                    orientation="h", marker_color=ORANGE)
+        fig.update_layout(barmode="overlay", legend_title="", xaxis_title="← Low Adopters   |   High Adopters →")
+        fig = chart_layout(fig, height=320)
+        st.plotly_chart(fig, use_container_width=True, key="home_diverging")
+        st.caption("The Anxiety−Knowledge gap shows the widest split of any single factor — it's doing more work than either component alone.")
 
 # ==================================================================
 # PAGE 2: DEMOGRAPHICS
 # ==================================================================
 with tab_demo:
-    page_header("Buyer Demographics", "Age, income, and household profile of survey respondents.")
+    page_header("Buyer Demographics", "Which demographic cuts predict adoption — and which ones you can stop targeting.")
 
     if not fdf.empty:
-        c1, c2, c3 = st.columns(3)
+        c1, c2 = st.columns(2)
         with c1:
             with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Purchase Rate by Age Group</div>', unsafe_allow_html=True)
-                tmp = fdf.groupby("Age_Group", observed=True)["Will_Buy_EV"].apply(lambda s: (s == "Yes").mean() * 100).reset_index()
-                tmp.columns = ["Age Group", "Rate (%)"]
-                fig = px.area(tmp, x="Age Group", y="Rate (%)", template=PLOT_TEMPLATE, color_discrete_sequence=[MINT])
-                fig.update_traces(line=dict(width=3))
-                fig = chart_layout(fig)
-                st.plotly_chart(fig, use_container_width=True, key="demo_age_area")
-        with c2:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Purchase Rate by Income Bracket</div>', unsafe_allow_html=True)
-                tmp = fdf.groupby("Income_Bracket", observed=True)["Will_Buy_EV"].apply(lambda s: (s == "Yes").mean() * 100).reset_index()
-                tmp.columns = ["Income Bracket", "Rate (%)"]
-                fig = px.line(tmp, x="Income Bracket", y="Rate (%)", markers=True,
-                              template=PLOT_TEMPLATE, color_discrete_sequence=[MINT])
-                fig.update_traces(line=dict(width=3), marker=dict(size=9))
-                fig = chart_layout(fig)
-                st.plotly_chart(fig, use_container_width=True, key="demo_income_line")
-        with c3:
-            purchase_rate_by(fdf, "Gender", "Purchase Rate by Gender")
-
-        c4, c5 = st.columns(2)
-        with c4:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Current Car Type Distribution</div>', unsafe_allow_html=True)
-                tmp = fdf["Current_Car_Type"].value_counts().reset_index()
-                tmp.columns = ["Car Type", "Count"]
-                fig = px.pie(tmp, names="Car Type", values="Count", hole=0.55,
-                             color_discrete_sequence=PALETTE_NEUTRAL, template=PLOT_TEMPLATE)
-                fig.update_traces(textinfo="percent+label")
-                fig = chart_layout(fig, showlegend=False)
-                st.plotly_chart(fig, use_container_width=True, key="demo_car_pie")
-        with c5:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Number of Cars Owned vs Purchase</div>', unsafe_allow_html=True)
-                tmp = fdf.groupby("Number_of_Cars_Owned")["Will_Buy_EV"].apply(lambda s: (s == "Yes").mean() * 100).reset_index()
-                tmp.columns = ["Cars Owned", "Rate (%)"]
-                fig = px.bar(tmp, x="Cars Owned", y="Rate (%)", text="Rate (%)",
+                st.markdown('<div class="chart-card-title">Income Bracket vs Adoption Rate</div>', unsafe_allow_html=True)
+                tmp = fdf.groupby("Income_Bracket", observed=True)["ev_adoption_likelihood"].apply(
+                    lambda s: (s == "High").mean() * 100
+                ).reindex(income_order).reset_index()
+                tmp.columns = ["Income Bracket", "% High Adoption"]
+                fig = px.bar(tmp, x="Income Bracket", y="% High Adoption", text="% High Adoption",
                              color_discrete_sequence=[MINT], template=PLOT_TEMPLATE)
                 fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+                fig.update_yaxes(range=[0, 100])
                 fig = chart_layout(fig)
-                st.plotly_chart(fig, use_container_width=True, key="demo_cars_owned")
+                st.plotly_chart(fig, use_container_width=True, key="demo_income_rate")
+                st.caption("32% → 90% across brackets — your strongest demographic lever, by a wide margin.")
+        with c2:
+            with st.container(border=True):
+                st.markdown('<div class="chart-card-title">City Type vs Adoption Rate</div>', unsafe_allow_html=True)
+                tmp = fdf.groupby("city_type")["ev_adoption_likelihood"].apply(lambda s: (s == "High").mean() * 100).reset_index()
+                tmp.columns = ["City Type", "% High Adoption"]
+                fig = px.bar(tmp, x="City Type", y="% High Adoption", text="% High Adoption", color="City Type",
+                             color_discrete_sequence=PALETTE_NEUTRAL, template=PLOT_TEMPLATE)
+                fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+                fig.update_yaxes(range=[0, 100])
+                fig = chart_layout(fig, showlegend=False)
+                st.plotly_chart(fig, use_container_width=True, key="demo_city_rate")
+                st.caption("Urban leads at 65% vs ~55% Rural/Suburban — real, but modest next to income.")
 
+        c3, c4 = st.columns(2)
+        with c3:
+            with st.container(border=True):
+                st.markdown('<div class="chart-card-title">Age Group vs Adoption Rate — No Effect</div>', unsafe_allow_html=True)
+                tmp = fdf.groupby("Age_Group", observed=True)["ev_adoption_likelihood"].apply(
+                    lambda s: (s == "High").mean() * 100
+                ).reindex(["18-25", "26-35", "36-45", "46-55", "56-65", "65+"]).reset_index()
+                tmp.columns = ["Age Group", "% High Adoption"]
+                fig = px.bar(tmp, x="Age Group", y="% High Adoption", text="% High Adoption",
+                             color_discrete_sequence=[GRAY_MID], template=PLOT_TEMPLATE)
+                fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+                fig.update_yaxes(range=[0, 100])
+                fig = chart_layout(fig)
+                st.plotly_chart(fig, use_container_width=True, key="demo_age_flat")
+                st.caption("58.8%–59.9% across every age band — essentially flat. Age-based targeting won't move adoption.")
+        with c4:
+            with st.container(border=True):
+                st.markdown('<div class="chart-card-title">Education Level vs Adoption Rate — No Effect</div>', unsafe_allow_html=True)
+                tmp = fdf.groupby("education_level")["ev_adoption_likelihood"].apply(
+                    lambda s: (s == "High").mean() * 100
+                ).reindex(["High School", "Bachelor", "Master", "PhD", "Unknown"]).reset_index()
+                tmp.columns = ["Education Level", "% High Adoption"]
+                fig = px.bar(tmp, x="Education Level", y="% High Adoption", text="% High Adoption",
+                             color_discrete_sequence=[GRAY_MID], template=PLOT_TEMPLATE)
+                fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+                fig.update_yaxes(range=[0, 100])
+                fig = chart_layout(fig)
+                st.plotly_chart(fig, use_container_width=True, key="demo_edu_flat")
+                st.caption("57.2%–59.6% across every education level — no meaningful pattern. Same conclusion: not a useful targeting axis.")
 # ==================================================================
 # PAGE 3: CHARGING INFRASTRUCTURE
 # ==================================================================
 with tab_charge:
-    page_header("Charging Infrastructure", "How access to chargers shapes range anxiety and buying decisions.")
+    page_header("Charging Infrastructure", "How charging access and cost shape adoption.")
 
     if not fdf.empty:
-        c1, c2, c3 = st.columns(3)
+        c1, c2 = st.columns(2)
         with c1:
             with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Stations Near Home vs Anxiety</div>', unsafe_allow_html=True)
-                fig = px.box(fdf, x="Range_Anxiety_Level", y="Charging_Stations_Near_Home",
-                             category_orders={"Range_Anxiety_Level": ["Low", "Medium", "High"]},
-                             color="Range_Anxiety_Level", color_discrete_sequence=PALETTE_SEVERITY, template=PLOT_TEMPLATE)
-                fig = chart_layout(fig, showlegend=False, xaxis_title="Range Anxiety", yaxis_title="Stations Near Home")
-                st.plotly_chart(fig, use_container_width=True, key="charge_box_home")
-        with c2:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Home Charging Impact on Purchase</div>', unsafe_allow_html=True)
-                tmp = fdf.groupby(["Home_Charging_Possible", "Will_Buy_EV"]).size().reset_index(name="Count")
-                fig = px.bar(tmp, x="Home_Charging_Possible", y="Count", color="Will_Buy_EV", barmode="group",
-                             color_discrete_sequence=[ORANGE, MINT], template=PLOT_TEMPLATE)
-                fig = chart_layout(fig, xaxis_title="Home Charging Possible", legend_title="")
-                st.plotly_chart(fig, use_container_width=True, key="charge_home_impact")
-        with c3:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Stations Near Work vs Anxiety</div>', unsafe_allow_html=True)
-                fig = px.box(fdf, x="Range_Anxiety_Level", y="Charging_Stations_Near_Work",
-                             category_orders={"Range_Anxiety_Level": ["Low", "Medium", "High"]},
-                             color="Range_Anxiety_Level", color_discrete_sequence=PALETTE_SEVERITY, template=PLOT_TEMPLATE)
-                fig = chart_layout(fig, showlegend=False, xaxis_title="Range Anxiety", yaxis_title="Stations Near Work")
-                st.plotly_chart(fig, use_container_width=True, key="charge_box_work")
-
-        c4, c5 = st.columns(2)
-        with c4:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Daily Commute vs Range Anxiety</div>', unsafe_allow_html=True)
-                fig = px.violin(fdf, x="Range_Anxiety_Level", y="Daily_Commute_km", box=True,
-                                 category_orders={"Range_Anxiety_Level": ["Low", "Medium", "High"]},
-                                 color="Range_Anxiety_Level", color_discrete_sequence=PALETTE_SEVERITY, template=PLOT_TEMPLATE)
-                fig = chart_layout(fig, showlegend=False, xaxis_title="Range Anxiety", yaxis_title="Daily Commute (km)")
-                st.plotly_chart(fig, use_container_width=True, key="charge_violin_commute")
-        with c5:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Correlation Between Numeric Factors</div>', unsafe_allow_html=True)
-                num_cols = ["Age", "Annual_Income_USD", "Daily_Commute_km", "Charging_Stations_Near_Home",
-                            "Charging_Stations_Near_Work", "Environmental_Concern_Level", "Range_Anxiety_Rank"]
-                corr = fdf[num_cols].corr()
-                mint_gray_scale = [[0, GRAY_MID], [0.5, "#15181c"], [1, MINT]]
-                fig = px.imshow(corr, text_auto=".2f", color_continuous_scale=mint_gray_scale, template=PLOT_TEMPLATE,
-                                 aspect="auto", zmin=-1, zmax=1)
-                fig = chart_layout(fig)
-                st.plotly_chart(fig, use_container_width=True, key="charge_heatmap")
-
-# ==================================================================
-# PAGE 4: BUYING BEHAVIOR
-# ==================================================================
-with tab_buy:
-    page_header("Buying Behavior Drivers", "Subsidies, environmental concern, and other purchase triggers.")
-
-    if not fdf.empty:
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Subsidy Availability Impact</div>', unsafe_allow_html=True)
-                tmp = fdf.groupby(["Subsidy_Available", "Will_Buy_EV"]).size().reset_index(name="Count")
-                fig = px.bar(tmp, x="Subsidy_Available", y="Count", color="Will_Buy_EV", barmode="group",
-                             color_discrete_sequence=[ORANGE, MINT], template=PLOT_TEMPLATE)
-                fig = chart_layout(fig, xaxis_title="Subsidy Available", legend_title="")
-                st.plotly_chart(fig, use_container_width=True, key="buy_subsidy_impact")
-        with c2:
-            purchase_rate_by(fdf, "Environmental_Concern_Level", "Environmental Concern vs Purchase",
-                              color_seq=[MINT_DIM] * 10)
-        with c3:
-            purchase_rate_by(fdf, "Current_Car_Type", "Purchase Rate by Car Type Owned")
-
-        c4, c5 = st.columns(2)
-        with c4:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Subsidy + Home Charging Combined Effect</div>', unsafe_allow_html=True)
-                tmp = fdf.groupby(["Subsidy_Available", "Home_Charging_Possible"])["Will_Buy_EV"].apply(lambda s: (s == "Yes").mean() * 100).reset_index()
-                tmp.columns = ["Subsidy", "Home Charging", "Rate (%)"]
-                fig = px.bar(tmp, x="Subsidy", y="Rate (%)", color="Home Charging", barmode="group", text="Rate (%)",
-                             color_discrete_sequence=[ORANGE, MINT], template=PLOT_TEMPLATE)
-                fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
-                fig = chart_layout(fig)
-                st.plotly_chart(fig, use_container_width=True, key="buy_combined_effect")
-        with c5:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Range Anxiety Distribution</div>', unsafe_allow_html=True)
-                tmp = fdf["Range_Anxiety_Level"].value_counts().reindex(["Low", "Medium", "High"]).reset_index()
-                tmp.columns = ["Range Anxiety", "Count"]
-                fig = px.pie(tmp, names="Range Anxiety", values="Count", hole=0.55,
-                             color="Range Anxiety", color_discrete_sequence=PALETTE_SEVERITY, template=PLOT_TEMPLATE)
+                st.markdown('<div class="chart-card-title">Home Charging Available</div>', unsafe_allow_html=True)
+                tmp = fdf["home_charging_available"].map({1: "Yes", 0: "No"}).value_counts().reset_index()
+                tmp.columns = ["Home Charging", "Count"]
+                fig = px.pie(tmp, names="Home Charging", values="Count", hole=0.6,
+                             color="Home Charging", color_discrete_map={"Yes": MINT, "No": ORANGE}, template=PLOT_TEMPLATE)
                 fig.update_traces(textinfo="percent+label")
                 fig = chart_layout(fig, showlegend=False)
-                st.plotly_chart(fig, use_container_width=True, key="buy_anxiety_pie")
+                st.plotly_chart(fig, use_container_width=True, key="charge_home_donut")
+        with c2:
+            with st.container(border=True):
+                st.markdown('<div class="chart-card-title">Charging Accessibility × Home Charging</div>', unsafe_allow_html=True)
+                tmp = fdf.copy()
+                tmp["Accessibility"] = pd.cut(tmp["charging_station_accessibility"], [0, 3, 7, 10], labels=["Low", "Medium", "High"], include_lowest=True)
+                tmp["Home Charging"] = tmp["home_charging_available"].map({1: "Yes", 0: "No"})
+                g = tmp.groupby(["Accessibility", "Home Charging"], observed=True)["ev_adoption_likelihood"].apply(
+                lambda s: (s == "High").mean() * 100
+                ).reset_index()
+                g.columns = ["Accessibility", "Home Charging", "% High Adoption"]
+                fig = px.bar(g, x="Accessibility", y="% High Adoption", color="Home Charging", barmode="group",
+                     text="% High Adoption", color_discrete_map={"Yes": MINT, "No": ORANGE}, template=PLOT_TEMPLATE,
+                     category_orders={"Accessibility": ["Low", "Medium", "High"]})
+                fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+                fig = chart_layout(fig)
+                st.plotly_chart(fig, use_container_width=True, key="charge_access_combo")
+                st.caption("Public accessibility and home charging compound — 70.7% adoption when both are strong, vs 36.6% when neither is.")
+
+        c3, c4 = st.columns(2)
+        with c3:
+            with st.container(border=True):
+                st.markdown('<div class="chart-card-title">Distance to Nearest Charger</div>', unsafe_allow_html=True)
+                tmp = fdf["Distance_Band"].value_counts().reindex(["<2 km", "2-5 km", "5-10 km", "10+ km"]).reset_index()
+                tmp.columns = ["Distance", "Count"]
+                fig = px.bar(tmp, x="Distance", y="Count", text="Count", color_discrete_sequence=[MINT], template=PLOT_TEMPLATE)
+                fig.update_traces(textposition="outside")
+                fig = chart_layout(fig)
+                st.plotly_chart(fig, use_container_width=True, key="charge_distance_band")
+        with c4:
+            with st.container(border=True):
+                st.markdown('<div class="chart-card-title">Charging Cost vs Energy Consumption</div>', unsafe_allow_html=True)
+                sample = fdf.sample(min(3000, len(fdf)), random_state=42)
+                fig = px.scatter(sample, x="monthly_energy_consumption_kwh", y="monthly_charging_cost",
+                                  color_discrete_sequence=[MINT], opacity=0.5, trendline="ols",
+                                  trendline_color_override=ORANGE, template=PLOT_TEMPLATE)
+                fig = chart_layout(fig, xaxis_title="Monthly Energy (kWh)", yaxis_title="Monthly Charging Cost ($)")
+                st.plotly_chart(fig, use_container_width=True, key="charge_scatter")
 
 # ==================================================================
-# PAGE 5: PREDICTION
+# PAGE 4: EV INSIGHTS
+# ==================================================================
+with tab_insights:
+    page_header("Adoption Drivers", "Why people adopt — and why they don't.")
+
+    if not fdf.empty:
+        with st.container(border=True):
+            st.markdown('<div class="chart-card-title">Range Anxiety × EV Knowledge — Adoption Rate Matrix</div>', unsafe_allow_html=True)
+            df_m = fdf.copy()
+            df_m["Anxiety"] = pd.cut(df_m["range_anxiety_score"], [0, 3, 7, 10], labels=["Low", "Medium", "High"], include_lowest=True)
+            df_m["Knowledge"] = pd.cut(df_m["ev_knowledge_score"], [0, 3, 7, 10], labels=["Low", "Medium", "High"], include_lowest=True)
+            matrix = df_m.groupby(["Anxiety", "Knowledge"], observed=True)["ev_adoption_likelihood"].apply(
+                lambda s: (s == "High").mean() * 100
+            ).unstack().reindex(index=["High", "Medium", "Low"], columns=["Low", "Medium", "High"])
+            fig = px.imshow(matrix, text_auto=".0f", color_continuous_scale=[[0, ORANGE], [0.5, "#15181c"], [1, MINT]],
+                             template=PLOT_TEMPLATE, aspect="auto", labels=dict(color="% High Adoption"))
+            fig.update_layout(xaxis_title="EV Knowledge", yaxis_title="Range Anxiety")
+            fig = chart_layout(fig, height=340)
+            st.plotly_chart(fig, use_container_width=True, key="ins_matrix")
+            st.caption("Knowledge overcomes anxiety, not the other way around — high-anxiety/high-knowledge respondents still adopt at ~37%, while high-anxiety/low-knowledge sits near 0%.")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            with st.container(border=True):
+                st.markdown('<div class="chart-card-title">Awareness Composite vs Adoption</div>', unsafe_allow_html=True)
+                tmp = fdf.copy()
+                tmp["Awareness (quartile)"] = pd.qcut(tmp["awareness_composite"], 4, duplicates="drop").astype(str)
+                g = tmp.groupby("Awareness (quartile)")["ev_adoption_likelihood"].apply(lambda s: (s == "High").mean() * 100).reset_index()
+                g.columns = ["Awareness (quartile)", "% High Adoption"]
+                fig = px.bar(g, x="Awareness (quartile)", y="% High Adoption", text="% High Adoption",
+                             color_discrete_sequence=[MINT], template=PLOT_TEMPLATE)
+                fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+                fig = chart_layout(fig)
+                st.plotly_chart(fig, use_container_width=True, key="ins_awareness")
+                st.caption("Environmental, tech, and incentive awareness move together — the composite score is a stronger single lever than any one of them alone.")
+        with c2:
+            with st.container(border=True):
+                st.markdown('<div class="chart-card-title">Previous EV Experience × Home Charging</div>', unsafe_allow_html=True)
+                tmp = fdf.copy()
+                tmp["Prior Experience"] = tmp["previous_ev_experience"].map({1: "Yes", 0: "No"})
+                tmp["Home Charging"] = tmp["home_charging_available"].map({1: "Yes", 0: "No"})
+                g = tmp.groupby(["Prior Experience", "Home Charging"])["ev_adoption_likelihood"].apply(
+                    lambda s: (s == "High").mean() * 100
+                ).reset_index()
+                g.columns = ["Prior Experience", "Home Charging", "% High Adoption"]
+                fig = px.bar(g, x="Prior Experience", y="% High Adoption", color="Home Charging", barmode="group",
+                             text="% High Adoption", color_discrete_map={"Yes": MINT, "No": ORANGE}, template=PLOT_TEMPLATE)
+                fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+                fig = chart_layout(fig)
+                st.plotly_chart(fig, use_container_width=True, key="ins_exp_charging")
+                st.caption("The two enablers stack: prior experience plus home charging (69.2%) beats either alone.")
+
+# ==================================================================
+# PAGE 5: FEATURE IMPORTANCE
+# ==================================================================
+with tab_importance:
+    page_header("Feature Importance", "What the trained CatBoost model actually relies on to predict adoption.")
+
+    imp = model.get_feature_importance()
+    imp_df = pd.DataFrame({"Feature": model.feature_names_, "Importance": imp}).sort_values("Importance", ascending=True).tail(15)
+
+    with st.container(border=True):
+        st.markdown('<div class="chart-card-title">Top 15 Features — CatBoost Importance Score</div>', unsafe_allow_html=True)
+        colors = [MINT if i >= len(imp_df) - 3 else MINT_DIM if i >= len(imp_df) - 8 else GRAY_MID for i in range(len(imp_df))]
+        fig = go.Figure(go.Bar(x=imp_df["Importance"], y=imp_df["Feature"], orientation="h", marker_color=colors))
+        fig = chart_layout(fig, height=520, xaxis_title="Importance Score")
+        st.plotly_chart(fig, use_container_width=True, key="feat_importance")
+
+    st.info("💡 The top 4 features — anxiety-vs-knowledge gap, awareness composite, charging accessibility, "
+            "and battery replacement concern — account for roughly two-thirds of the model's total decision weight. "
+            "Everything past the top 10 contributes marginally.")
+
+# ==================================================================
+# PAGE 6: PREDICTION
 # ==================================================================
 with tab_predict:
-    page_header("EV Purchase Prediction", "Enter a customer's profile and get a live XGBoost prediction.")
+    page_header("EV Adoption Predictor", "Score an individual profile using the live CatBoost model.", model_page=True)
 
     with st.form("prediction_form"):
-        st.markdown('<div class="chart-card-title">Customer Details</div>', unsafe_allow_html=True)
-
+        st.markdown('<div class="chart-card-title">Respondent Profile</div>', unsafe_allow_html=True)
         col_a, col_b, col_c = st.columns(3)
+
         with col_a:
-            age = st.number_input("Age", min_value=18, max_value=80, value=30)
-            gender_in = st.selectbox("Gender", ["Male", "Female"])
-            income = st.number_input("Annual Income (USD)", min_value=0, value=50000, step=1000)
-            cars = st.number_input("Number of Cars Owned", min_value=0, max_value=10, value=1)
+            st.markdown("**Financial**")
+            income = st.number_input("Annual Income ($)", min_value=5000, max_value=300000, value=45000, step=1000)
+            fuel_expense = st.number_input("Fuel Expense per Month ($)", min_value=0, max_value=1000, value=250)
+            charging_cost = st.number_input("Monthly Charging Cost ($, if EV)", min_value=0, max_value=500, value=40)
+            energy_kwh = st.number_input("Monthly Energy Consumption (kWh, if EV)", min_value=1, max_value=2000, value=300)
+
         with col_b:
-            commute = st.number_input("Daily Commute (km)", min_value=0, value=20)
-            home_station = st.number_input("Charging Stations Near Home", min_value=0, value=2)
-            work_station = st.number_input("Charging Stations Near Work", min_value=0, value=1)
-            home_charge_in = st.selectbox("Home Charging Possible", ["Yes", "No"])
+            st.markdown("**Commute & Vehicle**")
+            daily_commute = st.number_input("Daily Commute (km)", min_value=0, max_value=200, value=30)
+            weekly_travel = st.number_input("Weekly Travel Distance (km)", min_value=1, max_value=1500, value=210)
+            education = st.selectbox("Education Level", ["High School", "Bachelor", "Master", "PhD", "Unknown"])
+            city = st.selectbox("City Type", ["Rural", "Suburban", "Urban"])
+            vehicle = st.selectbox("Current Vehicle Type", ["Hatchback", "Sedan", "SUV", "Truck"])
+
         with col_c:
-            concern = st.slider("Environmental Concern", 1, 10, 5)
-            subsidy_in = st.selectbox("Subsidy Available", ["Yes", "No"])
-            range_anxiety_in = st.selectbox("Range Anxiety", ["Low", "Medium", "High"])
-            city_in = st.selectbox("City Type", ["Urban", "Suburban", "Rural"])
+            st.markdown("**Awareness & Charging Access**")
+            env_awareness = st.slider("Environmental Awareness", 1, 10, 6)
+            tech_affinity = st.slider("Technology Affinity", 1, 10, 6)
+            gov_awareness = st.slider("Government Incentive Awareness", 1, 10, 6)
+            range_anxiety = st.slider("Range Anxiety", 1, 10, 5)
+            battery_concern = st.slider("Battery Replacement Concern", 1, 10, 5)
+            ev_knowledge = st.slider("EV Knowledge Score", 1, 10, 6)
+            charging_access = st.slider("Charging Station Accessibility", 1, 10, 5)
+            nearest_km = st.number_input("Distance to Nearest Charger (km)", min_value=0.0, max_value=100.0, value=6.0)
+            home_charging = st.selectbox("Home Charging Available", ["Yes", "No"])
+            prev_experience = st.selectbox("Previous EV Experience", ["Yes", "No"])
 
-        # Current car only makes sense if the customer owns at least one car.
-        if cars == 0:
-            st.selectbox("Current Car", ["None — owns 0 cars"], index=0, disabled=True,
-                         help="Disabled because Number of Cars Owned is 0.")
-            car_in = "None"
-        else:
-            car_in = st.selectbox("Current Car", ["SUV", "Sedan", "Truck", "Hatchback"])
-
-        submitted = st.form_submit_button("🔮 Predict", use_container_width=True)
+        submitted = st.form_submit_button("🔮 Predict Adoption Likelihood", use_container_width=True)
 
     if submitted:
-        gender_n = 1 if gender_in == "Male" else 0
-        home_charge_n = 1 if home_charge_in == "Yes" else 0
-        subsidy_n = 1 if subsidy_in == "Yes" else 0
-        range_dict = {"Low": 0, "Medium": 1, "High": 2}
-        range_n = range_dict[range_anxiety_in]
-        city_suburban = 1 if city_in == "Suburban" else 0
-        city_urban = 1 if city_in == "Urban" else 0
-        # "None" and "Hatchback" both correctly encode as all-zero (baseline category) —
-        # this matches how the model was originally trained, so no schema change needed.
-        car_suv = 1 if car_in == "SUV" else 0
-        car_sedan = 1 if car_in == "Sedan" else 0
-        car_truck = 1 if car_in == "Truck" else 0
+        row = {
+            "annual_income": income,
+            "charging_station_accessibility": charging_access,
+            "nearest_charging_station_km": nearest_km,
+            "home_charging_available": 1 if home_charging == "Yes" else 0,
+            "environmental_awareness_score": env_awareness,
+            "government_incentive_awareness": gov_awareness,
+            "technology_affinity_score": tech_affinity,
+            "range_anxiety_score": range_anxiety,
+            "battery_replacement_concern": battery_concern,
+            "ev_knowledge_score": ev_knowledge,
+            "previous_ev_experience": 1 if prev_experience == "Yes" else 0,
+            "log_annual_income": np.log1p(income),
+            "log_monthly_charging_cost": np.log1p(charging_cost),
+            "fuel_cost_to_income_ratio": (fuel_expense * 12) / income,
+            "charging_cost_per_kwh_actual": charging_cost / energy_kwh,
+            "commute_consistency": (daily_commute * 7) / weekly_travel,
+            "anxiety_minus_knowledge": range_anxiety - ev_knowledge,
+            "awareness_composite": np.mean([env_awareness, tech_affinity, gov_awareness]),
+            "education_level_High School": 1 if education == "High School" else 0,
+            "education_level_Master": 1 if education == "Master" else 0,
+            "education_level_PhD": 1 if education == "PhD" else 0,
+            "education_level_Unknown": 1 if education == "Unknown" else 0,
+            "city_type_Suburban": 1 if city == "Suburban" else 0,
+            "city_type_Urban": 1 if city == "Urban" else 0,
+            "current_vehicle_type_SUV": 1 if vehicle == "SUV" else 0,
+            "current_vehicle_type_Sedan": 1 if vehicle == "Sedan" else 0,
+            "current_vehicle_type_Truck": 1 if vehicle == "Truck" else 0,
+        }
+        input_df = pd.DataFrame([row])[model.feature_names_]
 
-        input_df = pd.DataFrame({
-            "Age": [age], "Gender": [gender_n], "Annual_Income_USD": [income],
-            "Daily_Commute_km": [commute], "Number_of_Cars_Owned": [cars],
-            "Charging_Stations_Near_Home": [home_station], "Charging_Stations_Near_Work": [work_station],
-            "Home_Charging_Possible": [home_charge_n], "Environmental_Concern_Level": [concern],
-            "Subsidy_Available": [subsidy_n], "Range_Anxiety_Level": [range_n],
-            "City_Type_Suburban": [city_suburban], "City_Type_Urban": [city_urban],
-            "Current_Car_Type_SUV": [car_suv], "Current_Car_Type_Sedan": [car_sedan],
-            "Current_Car_Type_Truck": [car_truck],
-        })
-
-        prediction = model.predict(input_df)
-        probability = model.predict_proba(input_df)
-        buy_prob = probability[0][1]
+        pred_idx = int(model.predict(input_df)[0][0])
+        pred_label = CLASS_MAP[pred_idx]
+        proba = model.predict_proba(input_df)[0]
 
         st.markdown("<br>", unsafe_allow_html=True)
         with st.container(border=True):
-            r1, r2 = st.columns([1, 1])
+            r1, r2 = st.columns([1, 1.3])
             with r1:
-                if prediction[0] == 1:
-                    st.success("✅ Customer is likely to BUY an EV")
-                else:
-                    st.error("❌ Customer is NOT likely to buy an EV")
-                st.progress(int(buy_prob * 100))
-                st.caption(f"Probability of buying: {buy_prob*100:.2f}% · Not buying: {(1-buy_prob)*100:.2f}%")
+                badge_cls = {"Low": "verdict-low", "Medium": "verdict-medium", "High": "verdict-high"}[pred_label]
+                st.markdown(f'<div class="verdict-badge {badge_cls}">Adoption Likelihood: {pred_label}</div>', unsafe_allow_html=True)
+                st.markdown("<br>", unsafe_allow_html=True)
+                for cls, p in zip(["Low", "Medium", "High"], proba):
+                    st.markdown(f"**{cls}** — {p*100:.1f}%")
+                    st.progress(float(p))
             with r2:
-                kc1, kc2 = st.columns(2)
-                kpi(kc1, "🔮", "Buy Probability", f"{buy_prob*100:.1f}%")
-                kpi(kc2, "📊", "Confidence", "High" if abs(buy_prob - 0.5) > 0.3 else "Moderate")
+                st.markdown("**Top factors driving this prediction**")
+                pool = Pool(input_df)
+                shap_vals = model.get_feature_importance(pool, type="ShapValues")
+                contribs = shap_vals[0][pred_idx][:-1]
+                top_idx = np.argsort(np.abs(contribs))[::-1][:5]
+                for i in top_idx:
+                    fname = model.feature_names_[i]
+                    val = contribs[i]
+                    direction = "pos" if val > 0 else "negimpact"
+                    row_cls = "" if val > 0 else "neg"
+                    arrow = "▲ pushes toward" if val > 0 else "▼ pushes away from"
+                    st.markdown(
+                        f"""<div class="factor-row {row_cls}">
+                        <span class="factor-name">{fname.replace('_',' ').title()}</span>
+                        <span class="factor-impact {direction}">{arrow} {pred_label} ({val:+.2f})</span>
+                        </div>""", unsafe_allow_html=True
+                    )
 
 # ==================================================================
-# PAGE 6: AI ASSISTANT
+# PAGE 7: AI ASSISTANT
 # ==================================================================
 with tab_ai:
     page_header("EV AI Assistant", "Ask anything about EV adoption — answers reflect your current sidebar filters.")
@@ -629,16 +717,43 @@ with tab_ai:
     def build_context(data):
         if data.empty:
             return "No records match the current filters."
-        buy_rate = (data["Will_Buy_EV"] == "Yes").mean() * 100
+
+        adoption_rate = (data[TARGET] == "High").mean() * 100
+
         return f"""
 Records in current view: {len(data):,}
-Overall EV purchase rate in this view: {buy_rate:.1f}%
-Purchase rate by range anxiety: {data.groupby('Range_Anxiety_Level')['Will_Buy_EV'].apply(lambda s: (s=='Yes').mean()*100).round(1).to_dict()}
-Purchase rate by city type: {data.groupby('City_Type')['Will_Buy_EV'].apply(lambda s: (s=='Yes').mean()*100).round(1).to_dict()}
-Purchase rate by subsidy availability: {data.groupby('Subsidy_Available')['Will_Buy_EV'].apply(lambda s: (s=='Yes').mean()*100).round(1).to_dict()}
-Avg annual income: ${data['Annual_Income_USD'].mean():,.0f}
-Avg daily commute: {data['Daily_Commute_km'].mean():.1f} km
-Top predictive features from the trained XGBoost model: Subsidy_Available, Environmental_Concern_Level, Range_Anxiety_Level, Annual_Income_USD, City_Type_Urban.
+
+High EV Adoption Likelihood: {adoption_rate:.1f}%
+
+Average Annual Income: ${data['annual_income'].mean():,.0f}
+
+Average Awareness Composite: {data['awareness_composite'].mean():.2f}
+
+Average Range Anxiety Score: {data['range_anxiety_score'].mean():.2f}
+
+Average Charging Accessibility: {data['charging_station_accessibility'].mean():.2f}
+
+Previous EV Experience (1=Yes, 0=No): {data['previous_ev_experience'].value_counts().to_dict()}
+
+Home Charging Availability (1=Yes, 0=No): {data['home_charging_available'].value_counts().to_dict()}
+
+Education Distribution: {data['education_level'].value_counts().to_dict()}
+
+City Distribution: {data['city_type'].value_counts().to_dict()}
+
+Current Vehicle Types: {data['current_vehicle_type'].value_counts().to_dict()}
+
+Top CatBoost Features (in order of importance):
+1. anxiety_minus_knowledge
+2. awareness_composite
+3. charging_station_accessibility
+4. battery_replacement_concern
+5. home_charging_available
+6. environmental_awareness_score
+7. previous_ev_experience
+8. nearest_charging_station_km
+9. range_anxiety_score
+10. technology_affinity_score
 """.strip()
 
     with st.form("ai_form"):
@@ -650,12 +765,25 @@ Top predictive features from the trained XGBoost model: Subsidy_Available, Envir
             st.warning("Type a question first.")
         else:
             context = build_context(fdf)
-            prompt = f"""You are an EV data analyst. Answer using only this data summary. Be concise and specific.
+            prompt = f"""You are an AI EV Adoption Consultant.
 
-DATA SUMMARY:
+Answer ONLY using the dashboard summary below.
+
+If the user asks for insights:
+- Explain the dashboard.
+- Explain EV adoption behaviour.
+- Explain why certain factors influence EV adoption.
+- Explain the CatBoost prediction.
+- Explain feature importance.
+- Explain charging accessibility.
+- Explain awareness composite.
+
+If the user asks something unrelated to EV adoption or the dashboard, politely say you can only answer EV-related dashboard questions.
+
+Dashboard Summary
 {context}
 
-USER QUESTION:
+User Question
 {question}"""
 
             models_to_try = [
@@ -682,17 +810,3 @@ USER QUESTION:
                     st.success(answer)
                 else:
                     st.error(f"All models are currently rate-limited. Try again shortly. ({last_error})")
-
-# ==================================================================
-# PAGE 7: EXPLORE DATA
-# ==================================================================
-with tab_data:
-    page_header("Explore the Raw Data", "Drill into individual records within your current sidebar filters.")
-
-    buy_sel = st.selectbox("Further narrow by: Will Buy EV", ["All", "Yes", "No"])
-    view = fdf if buy_sel == "All" else fdf[fdf["Will_Buy_EV"] == buy_sel]
-
-    st.caption(f"Showing {len(view):,} of {len(df):,} total records")
-    st.dataframe(view, use_container_width=True, height=420)
-    csv = view.to_csv(index=False).encode("utf-8")
-    st.download_button("⬇ Download This View as CSV", csv, "filtered_ev_data.csv", "text/csv")

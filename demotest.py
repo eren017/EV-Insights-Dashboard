@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 import joblib
 from openai import OpenAI
@@ -54,9 +55,7 @@ st.markdown(f"""
     section[data-testid="stSidebar"] label, section[data-testid="stSidebar"] .stCaption,
     section[data-testid="stSidebar"] p {{ color: {GRAY_LIGHT} !important; font-weight: 600; }}
 
-    /* ================= dashboard-card / sidebar-card / filter-card =================
-       Streamlit can't accept custom class= on its native container, so these three
-       conceptual classes share one rule bound to the bordered-container testid. */
+    /* ================= dashboard-card / sidebar-card / filter-card ================= */
     .dashboard-card,
     [data-testid="stVerticalBlockBorderWrapper"] {{
         background: {CARD_GLASS} !important;
@@ -67,15 +66,17 @@ st.markdown(f"""
         box-shadow: 0 8px 32px rgba(0,0,0,0.55) !important;
         padding: 8px !important;
         transition: box-shadow 0.25s ease, transform 0.25s ease;
+        overflow: visible !important;
     }}
     [data-testid="stVerticalBlockBorderWrapper"]:hover {{
         box-shadow: 0 10px 40px rgba(82,242,198,0.12), 0 0 0 1px {BORDER_MINT} !important;
     }}
-    /* sidebar-card / filter-card variant: tighter radius, sits on black not glass */
     section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"] {{
         background: rgba(255,255,255,0.02) !important;
         border-radius: 18px !important;
         margin-bottom: 14px;
+        padding: 14px 14px 22px 14px !important;
+        overflow: visible !important;
     }}
     [data-testid="stForm"] {{
         background: {CARD_GLASS} !important;
@@ -88,7 +89,7 @@ st.markdown(f"""
     [data-testid="stVerticalBlockBorderWrapper"] label,
     [data-testid="stForm"] label {{ color: {WHITE} !important; }}
 
-    /* ================= form widgets: remove default Streamlit chrome ================= */
+    /* ================= form widgets ================= */
     .stSelectbox > div > div, .stMultiSelect > div > div,
     .stNumberInput > div > div, .stTextArea textarea, [data-baseweb="input"] {{
         background-color: rgba(255,255,255,0.05) !important;
@@ -101,36 +102,62 @@ st.markdown(f"""
         border-color: {MINT} !important; box-shadow: 0 0 0 3px rgba(82,242,198,0.18) !important;
     }}
 
-    /* multiselect pills — glass mint */
-    div[data-baseweb="tag"] {{
-        background-color: rgba(82,242,198,0.15) !important;
-        border: 1px solid rgba(82,242,198,0.45) !important;
+    /* multiselect pills — scoped to multiselect only, glass mint */
+    .stMultiSelect [data-baseweb="tag"] {{
+        background-color: rgba(82,242,198,0.18) !important;
+        border: 1px solid rgba(82,242,198,0.5) !important;
         border-radius: 999px !important;
     }}
-    div[data-baseweb="tag"] span {{ color: {MINT} !important; font-weight: 700; }}
+    .stMultiSelect [data-baseweb="tag"] span, .stMultiSelect [data-baseweb="tag"] * {{
+        color: {MINT} !important; font-weight: 700;
+    }}
+    .stMultiSelect [data-baseweb="tag"] svg {{ fill: {MINT} !important; }}
 
-    /* sliders — mint track + glowing thumb */
-    .stSlider [data-baseweb="slider"] > div > div {{ background: {MINT} !important; }}
-    .stSlider [role="slider"] {{
+    /* ================= sliders =================
+       Track fill color is inherited from the Streamlit theme's primaryColor
+       (set in .streamlit/config.toml — this is the actual fix for the red
+       track, since Streamlit sets that color at the source, not via CSS
+       we can reliably beat with guesses). CSS below only adds polish. */
+    .stSlider, .stSelectSlider {{ overflow: visible !important; padding-top: 6px; margin-bottom: 6px; }}
+    .stSlider [data-baseweb="slider"], .stSelectSlider [data-baseweb="slider"] {{ overflow: visible !important; }}
+    .stSlider [role="slider"], .stSelectSlider [role="slider"] {{
         background-color: {MINT} !important; border: 3px solid {INK} !important;
         box-shadow: 0 0 10px rgba(82,242,198,0.7) !important;
     }}
-    .stSelectSlider [data-baseweb="slider"] > div > div {{ background: {MINT} !important; }}
+    /* value label above the thumb — Streamlit only shows this on hover by
+       default; force it always visible with proper contrast */
+    [data-testid="stThumbValue"] {{
+        opacity: 1 !important; visibility: visible !important;
+        background-color: {MINT} !important; color: {INK} !important;
+        font-weight: 800 !important; border-radius: 8px !important;
+        padding: 2px 9px !important; white-space: nowrap !important;
+    }}
+    [data-testid="stTickBarMin"], [data-testid="stTickBarMax"] {{ color: {GRAY_LIGHT} !important; }}
 
-    /* ================= buttons — filled mint pill CTA ================= */
+    /* ================= buttons — filled mint pill CTA =================
+       Text color forced on every nested element too, since Streamlit wraps
+       button labels in their own <p>/<div> that otherwise keeps the
+       theme's white text color regardless of the button background. */
     .stButton>button, [data-testid="stFormSubmitButton"] button, [data-testid="stDownloadButton"] button {{
         background-color: {MINT} !important; color: {INK} !important;
         border-radius: 999px !important; font-weight: 800 !important; border: none !important;
         padding: 0.55rem 1.4rem !important;
         transition: box-shadow 0.2s ease, transform 0.2s ease;
     }}
+    .stButton>button *, [data-testid="stFormSubmitButton"] button *,
+    [data-testid="stDownloadButton"] button * {{ color: {INK} !important; }}
     .stButton>button:hover, [data-testid="stFormSubmitButton"] button:hover,
     [data-testid="stDownloadButton"] button:hover {{
         box-shadow: 0 0 22px rgba(82,242,198,0.55) !important; transform: translateY(-1px);
     }}
 
-    /* ================= nav-pill (tabs) ================= */
+    /* ================= nav-pill (tabs) =================
+       Also kills BaseWeb's default underline indicator, which was rendering
+       as a stray red bar under whichever tab it thought was "selected" —
+       our filled mint pill already shows the active state, so it's redundant. */
     .nav-pill, .stTabs [data-baseweb="tab-list"] {{ gap: 10px; border-bottom: none; margin-bottom: 22px; flex-wrap: wrap; }}
+    .stTabs [data-baseweb="tab-highlight"] {{ display: none !important; }}
+    .stTabs [data-baseweb="tab-border"] {{ display: none !important; }}
     .stTabs [data-baseweb="tab"] {{
         height: 42px; background-color: rgba(255,255,255,0.03); border-radius: 999px;
         color: {MINT}; font-weight: 700; padding: 0 22px; border: 1px solid {BORDER_MINT};
@@ -159,7 +186,8 @@ st.markdown(f"""
         transform: translateY(-5px);
         box-shadow: 0 16px 40px rgba(82,242,198,0.18), 0 0 0 1px {BORDER_MINT};
     }}
-    .metric-icon {{ font-size: 1.3rem; margin-bottom: 6px; opacity: 0.9; }}
+    .metric-icon {{ font-size: 1.2rem; margin-bottom: 6px; color: {MINT}; font-weight: 900; }}
+    .metric-icon.neg {{ color: {ORANGE}; }}
     .metric-label {{
         color: {GRAY_LIGHT}; font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
         letter-spacing: .08em; margin-bottom: 6px;
@@ -204,11 +232,8 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 ACCENT = MINT
-# Neutral categorical palette (no rainbow) — mint / grays, cycling
 PALETTE_NEUTRAL = [MINT, GRAY_LIGHT, MINT_DIM, GRAY_MID]
-# Binary good/concern palette — mint = positive, orange = the one highlighted concern
-PALETTE_BINARY = [ORANGE, MINT]        # order matches ["No","Yes"] alpha-sort used by groupby
-# 3-level severity palette (Low/Medium/High) — orange only highlights the "High" concern
+PALETTE_BINARY = [ORANGE, MINT]
 PALETTE_SEVERITY = [GRAY_MID, MINT_DIM, ORANGE]
 PLOT_TEMPLATE = "plotly_dark"
 CH = 300
@@ -216,35 +241,92 @@ CH = 300
 # ------------------------------------------------------------------
 # DATA + MODEL LOADING
 # ------------------------------------------------------------------
+import json
+CH = 340
+CARD_SOLID = "#111827"
+PLOT_TEMPLATE = "plotly_dark"
+
+TARGET = "ev_adoption_likelihood"
+TARGET_ORDER = ["Low", "Medium", "High"]
+
+
 @st.cache_data
 def load_data():
-    df = pd.read_csv("EV_Adoption_and_Range_Anxiety_Dataset.csv")
-    df["Annual_Income_USD"] = df["Annual_Income_USD"].fillna(df["Annual_Income_USD"].median())
-    df["Daily_Commute_km"] = df["Daily_Commute_km"].fillna(df["Daily_Commute_km"].median())
-    df["Environmental_Concern_Level"] = df["Environmental_Concern_Level"].fillna(
-        df["Environmental_Concern_Level"].median()
+    df = pd.read_csv("global_ev_adoption_behavior_2026.csv")
+    # -------------------------
+    # Fix categorical columns
+    # -------------------------
+    df["education_level"] = df["education_level"].fillna("Unknown").astype(str)
+    df["city_type"] = df["city_type"].fillna("Unknown").astype(str)
+    df["current_vehicle_type"] = df["current_vehicle_type"].fillna("Unknown").astype(str)
+
+    # -------------------------
+    # Missing Value Imputation
+    # -------------------------
+    for col in ["charging_station_accessibility", "ev_knowledge_score"]:
+        df[col] = df[col].fillna(df[col].median())
+
+    # -------------------------
+    # Data Cleaning
+    # -------------------------
+    df["fuel_expense_per_month"] = df["fuel_expense_per_month"].clip(lower=0)
+
+    # -------------------------
+    # Feature Engineering
+    # -------------------------
+    df["log_annual_income"] = np.log1p(df["annual_income"])
+
+    df["fuel_cost_to_income_ratio"] = (
+        df["fuel_expense_per_month"]
+        / (df["annual_income"] / 12 + 1)
     )
-    df["Range_Anxiety_Rank"] = df["Range_Anxiety_Level"].map({"Low": 0, "Medium": 1, "High": 2})
-    df["Income_Bracket"] = pd.cut(
-        df["Annual_Income_USD"], bins=[0, 40000, 70000, 100000, 150000, float("inf")],
-        labels=["<40k", "40k-70k", "70k-100k", "100k-150k", "150k+"]
+
+    df["charging_cost_per_kwh_actual"] = (
+        df["monthly_charging_cost"]
+        / (df["monthly_energy_consumption_kwh"] + 1)
     )
-    df["Age_Group"] = pd.cut(
-        df["Age"], bins=[0, 25, 35, 45, 55, 65, 120],
-        labels=["18-25", "26-35", "36-45", "46-55", "56-65", "65+"]
+
+    df["commute_consistency"] = (
+        df["weekly_travel_distance_km"]
+        / (df["daily_commute_km"] * 7 + 1)
     )
+
+    df["anxiety_minus_knowledge"] = (
+        df["range_anxiety_score"]
+        - df["ev_knowledge_score"]
+    )
+
+    df["awareness_composite"] = (
+        df["environmental_awareness_score"]
+        + df["government_incentive_awareness"]
+        + df["technology_affinity_score"]
+    ) / 3
+
     return df
+
 
 @st.cache_resource
 def load_model():
-    return joblib.load("ev_xgboost.pkl")
+    return joblib.load("best_ev_adoption_model.pkl")
+
+
+@st.cache_resource
+def load_feature_columns():
+    with open("feature_columns.json", "r") as f:
+        return json.load(f)
+
 
 @st.cache_resource
 def load_llm_client():
-    return OpenAI(base_url="https://openrouter.ai/api/v1", api_key=st.secrets["OPENROUTER_API_KEY"])
+    return OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=st.secrets["OPENROUTER_API_KEY"],
+    )
+
 
 df = load_data()
 model = load_model()
+feature_columns = load_feature_columns()
 client = load_llm_client()
 
 # ------------------------------------------------------------------
@@ -252,9 +334,10 @@ client = load_llm_client()
 # ------------------------------------------------------------------
 def kpi(col, icon, label, value, sub=None, sub_neg=False):
     sub_html = f"<div class='metric-sub{' neg' if sub_neg else ''}'>{sub}</div>" if sub else ""
+    icon_cls = "metric-icon neg" if sub_neg else "metric-icon"
     col.markdown(
         f"""<div class="metric-card">
-            <div class="metric-icon">{icon}</div>
+            <div class="{icon_cls}">{icon}</div>
             <div class="metric-label">{label}</div>
             <div class="metric-value">{value}</div>{sub_html}</div>""",
         unsafe_allow_html=True,
@@ -274,7 +357,9 @@ def purchase_rate_by(data, col, title, order=None, color_seq=PALETTE_NEUTRAL):
         if data.empty:
             st.info("No records match the current filters.")
             return
-        tmp = data.groupby(col, observed=True)["Will_Buy_EV"].apply(lambda s: (s == "Yes").mean() * 100)
+        tmp = data.groupby(col, observed=True)[TARGET].apply(
+    lambda s: (s == "Yes").mean() * 100
+)
         if order:
             tmp = tmp.reindex(order)
         tmp = tmp.reset_index()
@@ -297,40 +382,77 @@ def page_header(title, subtitle):
     )
 
 # ------------------------------------------------------------------
-# SIDEBAR — control panel, grouped filter cards with icons
+# SIDEBAR — Control Panel
 # ------------------------------------------------------------------
 with st.sidebar:
     st.markdown("### ⚙ Control Panel")
-    st.caption("Filters apply across every page — charts, KPIs, and the AI Assistant.")
+    st.caption("Filters apply across every dashboard page.")
 
     with st.container(border=True):
-        city_f = st.multiselect("🏙 City Type", sorted(df["City_Type"].unique()), default=sorted(df["City_Type"].unique()))
-        anxiety_f = st.multiselect("⚠ Range Anxiety", ["Low", "Medium", "High"], default=["Low", "Medium", "High"])
+        city_f = st.multiselect(
+            "🏙 City Type",
+            sorted(df["city_type"].dropna().astype(str).unique()),
+            default=sorted(df["city_type"].unique())
+        )
+
+        education_f = st.multiselect(
+            "🎓 Education",
+            sorted(df["education_level"].dropna().astype(str).unique()),
+            default=sorted(df["education_level"].unique())
+        )
 
     with st.container(border=True):
-        subsidy_f = st.select_slider("💰 Subsidy Available", options=["All", "Yes", "No"], value="All")
-        home_charge_f = st.select_slider("🔌 Home Charging Possible", options=["All", "Yes", "No"], value="All")
+
+        vehicle_f = st.multiselect(
+            "🚗 Vehicle Type",
+            sorted(df["current_vehicle_type"].dropna().astype(str).unique()),
+            default=sorted(df["current_vehicle_type"].unique())
+        )
+
+        home_charge_f = st.select_slider(
+            "🔌 Home Charging",
+            options=["All", "Yes", "No"],
+            value="All"
+        )
 
     with st.container(border=True):
-        age_f = st.slider("🎂 Age Range", int(df["Age"].min()), int(df["Age"].max()),
-                           (int(df["Age"].min()), int(df["Age"].max())))
-        income_f = st.slider("💵 Annual Income (USD)", int(df["Annual_Income_USD"].min()), int(df["Annual_Income_USD"].max()),
-                              (int(df["Annual_Income_USD"].min()), int(df["Annual_Income_USD"].max())), step=1000)
 
-    if st.button("↺ Reset All Filters", use_container_width=True):
+        income_f = st.slider(
+            "💰 Annual Income",
+            int(df["annual_income"].min()),
+            int(df["annual_income"].max()),
+            (
+                int(df["annual_income"].min()),
+                int(df["annual_income"].max())
+            ),
+            step=1000
+        )
+
+        anxiety_f = st.slider(
+            "⚠ Range Anxiety Score",
+            int(df["range_anxiety_score"].min()),
+            int(df["range_anxiety_score"].max()),
+            (
+                int(df["range_anxiety_score"].min()),
+                int(df["range_anxiety_score"].max())
+            )
+        )
+
+    if st.button("↺ Reset Filters", use_container_width=True):
         st.rerun()
 
-# ---- Apply filters once, reuse everywhere as `fdf` ----
 fdf = df[
-    df["City_Type"].isin(city_f)
-    & df["Range_Anxiety_Level"].isin(anxiety_f)
-    & df["Age"].between(*age_f)
-    & df["Annual_Income_USD"].between(*income_f)
+    df["city_type"].isin(city_f)
+    & df["education_level"].isin(education_f)
+    & df["current_vehicle_type"].isin(vehicle_f)
+    & df["annual_income"].between(*income_f)
+    & df["range_anxiety_score"].between(*anxiety_f)
 ]
-if subsidy_f != "All":
-    fdf = fdf[fdf["Subsidy_Available"] == subsidy_f]
+
 if home_charge_f != "All":
-    fdf = fdf[fdf["Home_Charging_Possible"] == home_charge_f]
+    fdf = fdf[
+        fdf["home_charging_available"] == home_charge_f
+    ]
 
 # ------------------------------------------------------------------
 # NAVBAR
@@ -338,286 +460,807 @@ if home_charge_f != "All":
 st.markdown(f"""
 <div class="navbar">
     <div class="navbar-brand">⚡ EV<span>Insights</span></div>
-    <div class="navbar-sub">EV Adoption & Range Anxiety · Executive Dashboard</div>
+    <div class="navbar-sub">AI-Powered EV Adoption Analytics Platform</div>
 </div>
 """, unsafe_allow_html=True)
 
-tab_home, tab_demo, tab_charge, tab_buy, tab_predict, tab_ai, tab_data = st.tabs([
-    "🏠 Home", "👥 Demographics", "🔌 Charging", "🛒 Buying",
-    "🤖 Prediction", "💬 AI Assistant", "📄 Explore Data"
+tab_dashboard, tab_insights, tab_predict, tab_ai = st.tabs([
+    "🏠 Dashboard",
+    "📈 Consumer Insights",
+    "🤖 EV Prediction",
+    "💬 AI Assistant"
 ])
 
 if fdf.empty:
     st.warning("⚠️ No records match your current sidebar filters — widen them to see data on any page.")
 
 # ==================================================================
-# PAGE 1: HOME
+# PAGE 1: DASHBOARD
 # ==================================================================
-with tab_home:
-    page_header("EV Adoption Overview", "A snapshot of who buys electric vehicles — and what holds the rest back.")
+with tab_dashboard:
+    page_header(
+        "EV Adoption Dashboard",
+        "Executive overview of EV adoption trends and consumer behaviour."
+    )
 
     if not fdf.empty:
-        buy_rate = (fdf["Will_Buy_EV"] == "Yes").mean() * 100
-        avg_income = fdf["Annual_Income_USD"].mean()
-        high_anxiety_pct = (fdf["Range_Anxiety_Level"] == "High").mean() * 100
-        home_charge_pct = (fdf["Home_Charging_Possible"] == "Yes").mean() * 100
+
+        adoption_rate = (fdf[TARGET] == "Yes").mean() * 100
+        avg_income = fdf["annual_income"].mean()
+        avg_awareness = fdf["awareness_composite"].mean()
+        home_charge_pct = (fdf["home_charging_available"] == "Yes").mean() * 100
+        high_anxiety_pct = (
+            fdf["range_anxiety_score"] >= 7
+        ).mean() * 100
 
         k1, k2, k3, k4, k5 = st.columns(5)
-        kpi(k1, "👥", "Buyers in View", f"{len(fdf):,}")
-        kpi(k2, "⚡", "Will Buy an EV", f"{buy_rate:.1f}%")
-        kpi(k3, "💵", "Avg Annual Income", f"${avg_income:,.0f}")
-        kpi(k4, "⚠", "High Range Anxiety", f"{high_anxiety_pct:.1f}%",
-            "Biggest adoption blocker" if high_anxiety_pct > 20 else None, sub_neg=True)
-        kpi(k5, "🔌", "Home Charging Access", f"{home_charge_pct:.1f}%")
+
+        kpi(k1, "👥", "Respondents", f"{len(fdf):,}")
+
+        kpi(k2, "⚡", "EV Adoption", f"{adoption_rate:.1f}%")
+
+        kpi(k3, "💰", "Avg Annual Income", f"${avg_income:,.0f}")
+
+        kpi(
+            k4,
+            "⚠️",
+            "High Range Anxiety",
+            f"{high_anxiety_pct:.1f}%"
+        )
+
+        kpi(
+            k5,
+            "🔌",
+            "Home Charging",
+            f"{home_charge_pct:.1f}%"
+        )
 
         st.markdown("<br>", unsafe_allow_html=True)
+
         c1, c2, c3 = st.columns(3)
+
         with c1:
             with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Purchase Decision Split</div>', unsafe_allow_html=True)
-                tmp = fdf["Will_Buy_EV"].value_counts().reset_index()
+                st.markdown(
+                    '<div class="chart-card-title">EV Adoption Distribution</div>',
+                    unsafe_allow_html=True,
+                )
+
+                tmp = (
+                    fdf[TARGET]
+                    .value_counts()
+                    .reset_index()
+                )
                 tmp.columns = ["Decision", "Count"]
-                fig = px.pie(tmp, names="Decision", values="Count", hole=0.62,
-                             color="Decision", color_discrete_map={"Yes": MINT, "No": ORANGE},
-                             template=PLOT_TEMPLATE)
+
+                fig = px.pie(
+                    tmp,
+                    names="Decision",
+                    values="Count",
+                    hole=0.62,
+                    color="Decision",
+                    color_discrete_map={
+                        "Yes": MINT,
+                        "No": ORANGE,
+                    },
+                    template=PLOT_TEMPLATE,
+                )
+
                 fig.update_traces(textinfo="percent+label")
                 fig = chart_layout(fig, showlegend=False)
-                st.plotly_chart(fig, use_container_width=True, key="home_pie")
+
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True,
+                    key="dashboard_pie",
+                )
+
         with c2:
-            purchase_rate_by(fdf, "Range_Anxiety_Level", "Purchase Rate by Range Anxiety",
-                              order=["Low", "Medium", "High"], color_seq=PALETTE_SEVERITY)
+            purchase_rate_by(
+                fdf,
+                "charging_station_accessibility",
+                "EV Adoption by Charging Accessibility",
+            )
+
         with c3:
-            purchase_rate_by(fdf, "City_Type", "Purchase Rate by City Type")
-
-# ==================================================================
-# PAGE 2: DEMOGRAPHICS
-# ==================================================================
-with tab_demo:
-    page_header("Buyer Demographics", "Age, income, and household profile of survey respondents.")
-
-    if not fdf.empty:
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Purchase Rate by Age Group</div>', unsafe_allow_html=True)
-                tmp = fdf.groupby("Age_Group", observed=True)["Will_Buy_EV"].apply(lambda s: (s == "Yes").mean() * 100).reset_index()
-                tmp.columns = ["Age Group", "Rate (%)"]
-                fig = px.area(tmp, x="Age Group", y="Rate (%)", template=PLOT_TEMPLATE, color_discrete_sequence=[MINT])
-                fig.update_traces(line=dict(width=3))
-                fig = chart_layout(fig)
-                st.plotly_chart(fig, use_container_width=True, key="demo_age_area")
-        with c2:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Purchase Rate by Income Bracket</div>', unsafe_allow_html=True)
-                tmp = fdf.groupby("Income_Bracket", observed=True)["Will_Buy_EV"].apply(lambda s: (s == "Yes").mean() * 100).reset_index()
-                tmp.columns = ["Income Bracket", "Rate (%)"]
-                fig = px.line(tmp, x="Income Bracket", y="Rate (%)", markers=True,
-                              template=PLOT_TEMPLATE, color_discrete_sequence=[MINT])
-                fig.update_traces(line=dict(width=3), marker=dict(size=9))
-                fig = chart_layout(fig)
-                st.plotly_chart(fig, use_container_width=True, key="demo_income_line")
-        with c3:
-            purchase_rate_by(fdf, "Gender", "Purchase Rate by Gender")
-
-        c4, c5 = st.columns(2)
-        with c4:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Current Car Type Distribution</div>', unsafe_allow_html=True)
-                tmp = fdf["Current_Car_Type"].value_counts().reset_index()
-                tmp.columns = ["Car Type", "Count"]
-                fig = px.pie(tmp, names="Car Type", values="Count", hole=0.55,
-                             color_discrete_sequence=PALETTE_NEUTRAL, template=PLOT_TEMPLATE)
-                fig.update_traces(textinfo="percent+label")
-                fig = chart_layout(fig, showlegend=False)
-                st.plotly_chart(fig, use_container_width=True, key="demo_car_pie")
-        with c5:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Number of Cars Owned vs Purchase</div>', unsafe_allow_html=True)
-                tmp = fdf.groupby("Number_of_Cars_Owned")["Will_Buy_EV"].apply(lambda s: (s == "Yes").mean() * 100).reset_index()
-                tmp.columns = ["Cars Owned", "Rate (%)"]
-                fig = px.bar(tmp, x="Cars Owned", y="Rate (%)", text="Rate (%)",
-                             color_discrete_sequence=[MINT], template=PLOT_TEMPLATE)
-                fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
-                fig = chart_layout(fig)
-                st.plotly_chart(fig, use_container_width=True, key="demo_cars_owned")
-
+            purchase_rate_by(
+                fdf,
+                "city_type",
+                "EV Adoption by City Type",
+            )
 # ==================================================================
 # PAGE 3: CHARGING INFRASTRUCTURE
 # ==================================================================
-with tab_charge:
+with tab_insights:
     page_header("Charging Infrastructure", "How access to chargers shapes range anxiety and buying decisions.")
 
     if not fdf.empty:
         c1, c2, c3 = st.columns(3)
-        with c1:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Stations Near Home vs Anxiety</div>', unsafe_allow_html=True)
-                fig = px.box(fdf, x="Range_Anxiety_Level", y="Charging_Stations_Near_Home",
-                             category_orders={"Range_Anxiety_Level": ["Low", "Medium", "High"]},
-                             color="Range_Anxiety_Level", color_discrete_sequence=PALETTE_SEVERITY, template=PLOT_TEMPLATE)
-                fig = chart_layout(fig, showlegend=False, xaxis_title="Range Anxiety", yaxis_title="Stations Near Home")
-                st.plotly_chart(fig, use_container_width=True, key="charge_box_home")
-        with c2:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Home Charging Impact on Purchase</div>', unsafe_allow_html=True)
-                tmp = fdf.groupby(["Home_Charging_Possible", "Will_Buy_EV"]).size().reset_index(name="Count")
-                fig = px.bar(tmp, x="Home_Charging_Possible", y="Count", color="Will_Buy_EV", barmode="group",
-                             color_discrete_sequence=[ORANGE, MINT], template=PLOT_TEMPLATE)
-                fig = chart_layout(fig, xaxis_title="Home Charging Possible", legend_title="")
-                st.plotly_chart(fig, use_container_width=True, key="charge_home_impact")
-        with c3:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Stations Near Work vs Anxiety</div>', unsafe_allow_html=True)
-                fig = px.box(fdf, x="Range_Anxiety_Level", y="Charging_Stations_Near_Work",
-                             category_orders={"Range_Anxiety_Level": ["Low", "Medium", "High"]},
-                             color="Range_Anxiety_Level", color_discrete_sequence=PALETTE_SEVERITY, template=PLOT_TEMPLATE)
-                fig = chart_layout(fig, showlegend=False, xaxis_title="Range Anxiety", yaxis_title="Stations Near Work")
-                st.plotly_chart(fig, use_container_width=True, key="charge_box_work")
 
-        c4, c5 = st.columns(2)
-        with c4:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Daily Commute vs Range Anxiety</div>', unsafe_allow_html=True)
-                fig = px.violin(fdf, x="Range_Anxiety_Level", y="Daily_Commute_km", box=True,
-                                 category_orders={"Range_Anxiety_Level": ["Low", "Medium", "High"]},
-                                 color="Range_Anxiety_Level", color_discrete_sequence=PALETTE_SEVERITY, template=PLOT_TEMPLATE)
-                fig = chart_layout(fig, showlegend=False, xaxis_title="Range Anxiety", yaxis_title="Daily Commute (km)")
-                st.plotly_chart(fig, use_container_width=True, key="charge_violin_commute")
-        with c5:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Correlation Between Numeric Factors</div>', unsafe_allow_html=True)
-                num_cols = ["Age", "Annual_Income_USD", "Daily_Commute_km", "Charging_Stations_Near_Home",
-                            "Charging_Stations_Near_Work", "Environmental_Concern_Level", "Range_Anxiety_Rank"]
-                corr = fdf[num_cols].corr()
-                mint_gray_scale = [[0, GRAY_MID], [0.5, "#15181c"], [1, MINT]]
-                fig = px.imshow(corr, text_auto=".2f", color_continuous_scale=mint_gray_scale, template=PLOT_TEMPLATE,
-                                 aspect="auto", zmin=-1, zmax=1)
-                fig = chart_layout(fig)
-                st.plotly_chart(fig, use_container_width=True, key="charge_heatmap")
+with c1:
+    purchase_rate_by(
+        fdf,
+        "education_level",
+        "EV Adoption by Education"
+    )
+
+with c2:
+    purchase_rate_by(
+        fdf,
+        "city_type",
+        "EV Adoption by City Type"
+    )
+
+with c3:
+    purchase_rate_by(
+        fdf,
+        "current_vehicle_type",
+        "EV Adoption by Vehicle Type"
+    )
+
+c4, c5 = st.columns(2)
+
+with c4:
+    purchase_rate_by(
+        fdf,
+        "previous_ev_experience",
+        "Previous EV Experience"
+    )
+
+with c5:
+    purchase_rate_by(
+        fdf,
+        "home_charging_available",
+        "Home Charging Availability"
+    )
+
+c6, c7 = st.columns(2)
+
+with c6:
+
+    with st.container(border=True):
+
+        st.markdown(
+            '<div class="chart-card-title">Environmental Awareness Distribution</div>',
+            unsafe_allow_html=True
+        )
+
+        fig = px.histogram(
+            fdf,
+            x="environmental_awareness_score",
+            nbins=10,
+            color_discrete_sequence=[MINT],
+            template=PLOT_TEMPLATE
+        )
+
+        fig = chart_layout(fig)
+
+        st.plotly_chart(fig, use_container_width=True)
+
+with c7:
+
+    with st.container(border=True):
+
+        st.markdown(
+            '<div class="chart-card-title">Technology Affinity Distribution</div>',
+            unsafe_allow_html=True
+        )
+
+        fig = px.histogram(
+            fdf,
+            x="technology_affinity_score",
+            nbins=10,
+            color_discrete_sequence=[MINT],
+            template=PLOT_TEMPLATE
+        )
+
+        fig = chart_layout(fig)
+
+        st.plotly_chart(fig, use_container_width=True)
 
 # ==================================================================
 # PAGE 4: BUYING BEHAVIOR
 # ==================================================================
-with tab_buy:
+with tab_insights:
     page_header("Buying Behavior Drivers", "Subsidies, environmental concern, and other purchase triggers.")
 
     if not fdf.empty:
         c1, c2, c3 = st.columns(3)
-        with c1:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Subsidy Availability Impact</div>', unsafe_allow_html=True)
-                tmp = fdf.groupby(["Subsidy_Available", "Will_Buy_EV"]).size().reset_index(name="Count")
-                fig = px.bar(tmp, x="Subsidy_Available", y="Count", color="Will_Buy_EV", barmode="group",
-                             color_discrete_sequence=[ORANGE, MINT], template=PLOT_TEMPLATE)
-                fig = chart_layout(fig, xaxis_title="Subsidy Available", legend_title="")
-                st.plotly_chart(fig, use_container_width=True, key="buy_subsidy_impact")
-        with c2:
-            purchase_rate_by(fdf, "Environmental_Concern_Level", "Environmental Concern vs Purchase",
-                              color_seq=[MINT_DIM] * 10)
-        with c3:
-            purchase_rate_by(fdf, "Current_Car_Type", "Purchase Rate by Car Type Owned")
 
-        c4, c5 = st.columns(2)
-        with c4:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Subsidy + Home Charging Combined Effect</div>', unsafe_allow_html=True)
-                tmp = fdf.groupby(["Subsidy_Available", "Home_Charging_Possible"])["Will_Buy_EV"].apply(lambda s: (s == "Yes").mean() * 100).reset_index()
-                tmp.columns = ["Subsidy", "Home Charging", "Rate (%)"]
-                fig = px.bar(tmp, x="Subsidy", y="Rate (%)", color="Home Charging", barmode="group", text="Rate (%)",
-                             color_discrete_sequence=[ORANGE, MINT], template=PLOT_TEMPLATE)
-                fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
-                fig = chart_layout(fig)
-                st.plotly_chart(fig, use_container_width=True, key="buy_combined_effect")
-        with c5:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Range Anxiety Distribution</div>', unsafe_allow_html=True)
-                tmp = fdf["Range_Anxiety_Level"].value_counts().reindex(["Low", "Medium", "High"]).reset_index()
-                tmp.columns = ["Range Anxiety", "Count"]
-                fig = px.pie(tmp, names="Range Anxiety", values="Count", hole=0.55,
-                             color="Range Anxiety", color_discrete_sequence=PALETTE_SEVERITY, template=PLOT_TEMPLATE)
-                fig.update_traces(textinfo="percent+label")
-                fig = chart_layout(fig, showlegend=False)
-                st.plotly_chart(fig, use_container_width=True, key="buy_anxiety_pie")
+with c1:
+    purchase_rate_by(
+        fdf,
+        "government_incentive_awareness",
+        "Government Incentive Awareness"
+    )
+
+with c2:
+    purchase_rate_by(
+        fdf,
+        "battery_replacement_concern",
+        "Battery Replacement Concern"
+    )
+
+with c3:
+    purchase_rate_by(
+        fdf,
+        "charging_station_accessibility",
+        "Charging Station Accessibility"
+    )
+
+c4, c5 = st.columns(2)
+
+with c4:
+
+    with st.container(border=True):
+
+        st.markdown(
+            '<div class="chart-card-title">Range Anxiety Score Distribution</div>',
+            unsafe_allow_html=True
+        )
+
+        fig = px.histogram(
+            fdf,
+            x="range_anxiety_score",
+            nbins=10,
+            color_discrete_sequence=[MINT],
+            template=PLOT_TEMPLATE
+        )
+
+        fig = chart_layout(fig)
+
+        st.plotly_chart(fig, use_container_width=True)
+
+with c5:
+
+    with st.container(border=True):
+
+        st.markdown(
+            '<div class="chart-card-title">Awareness Composite Distribution</div>',
+            unsafe_allow_html=True
+        )
+
+        fig = px.histogram(
+            fdf,
+            x="awareness_composite",
+            nbins=10,
+            color_discrete_sequence=[MINT],
+            template=PLOT_TEMPLATE
+        )
+
+        fig = chart_layout(fig)
+
+        st.plotly_chart(fig, use_container_width=True)
 
 # ==================================================================
 # PAGE 5: PREDICTION
 # ==================================================================
+# ==================================================================
+# PAGE 3: EV PREDICTION
+# ==================================================================
 with tab_predict:
-    page_header("EV Purchase Prediction", "Enter a customer's profile and get a live XGBoost prediction.")
+
+    page_header(
+        "EV Adoption Prediction",
+        "Predict a user's EV adoption likelihood using the trained CatBoost model."
+    )
 
     with st.form("prediction_form"):
-        st.markdown('<div class="chart-card-title">Customer Details</div>', unsafe_allow_html=True)
 
-        col_a, col_b, col_c = st.columns(3)
-        with col_a:
-            age = st.number_input("Age", min_value=18, max_value=80, value=30)
-            gender_in = st.selectbox("Gender", ["Male", "Female"])
-            income = st.number_input("Annual Income (USD)", min_value=0, value=50000, step=1000)
-            cars = st.number_input("Number of Cars Owned", min_value=0, max_value=10, value=1)
-        with col_b:
-            commute = st.number_input("Daily Commute (km)", min_value=0, value=20)
-            home_station = st.number_input("Charging Stations Near Home", min_value=0, value=2)
-            work_station = st.number_input("Charging Stations Near Work", min_value=0, value=1)
-            home_charge_in = st.selectbox("Home Charging Possible", ["Yes", "No"])
-        with col_c:
-            concern = st.slider("Environmental Concern", 1, 10, 5)
-            subsidy_in = st.selectbox("Subsidy Available", ["Yes", "No"])
-            range_anxiety_in = st.selectbox("Range Anxiety", ["Low", "Medium", "High"])
-            city_in = st.selectbox("City Type", ["Urban", "Suburban", "Rural"])
+        st.markdown(
+            '<div class="chart-card-title">Enter Customer Information</div>',
+            unsafe_allow_html=True
+        )
 
-        # Current car only makes sense if the customer owns at least one car.
-        if cars == 0:
-            st.selectbox("Current Car", ["None — owns 0 cars"], index=0, disabled=True,
-                         help="Disabled because Number of Cars Owned is 0.")
-            car_in = "None"
-        else:
-            car_in = st.selectbox("Current Car", ["SUV", "Sedan", "Truck", "Hatchback"])
+        c1, c2, c3 = st.columns(3)
 
-        submitted = st.form_submit_button("🔮 Predict", use_container_width=True)
+        # -------------------------------------------------------
+        # Personal Information
+        # -------------------------------------------------------
+        with c1:
 
-    if submitted:
-        gender_n = 1 if gender_in == "Male" else 0
-        home_charge_n = 1 if home_charge_in == "Yes" else 0
-        subsidy_n = 1 if subsidy_in == "Yes" else 0
-        range_dict = {"Low": 0, "Medium": 1, "High": 2}
-        range_n = range_dict[range_anxiety_in]
-        city_suburban = 1 if city_in == "Suburban" else 0
-        city_urban = 1 if city_in == "Urban" else 0
-        # "None" and "Hatchback" both correctly encode as all-zero (baseline category) —
-        # this matches how the model was originally trained, so no schema change needed.
-        car_suv = 1 if car_in == "SUV" else 0
-        car_sedan = 1 if car_in == "Sedan" else 0
-        car_truck = 1 if car_in == "Truck" else 0
+            annual_income = st.number_input(
+                "Annual Income",
+                min_value=0,
+                value=60000,
+                step=1000
+            )
 
-        input_df = pd.DataFrame({
-            "Age": [age], "Gender": [gender_n], "Annual_Income_USD": [income],
-            "Daily_Commute_km": [commute], "Number_of_Cars_Owned": [cars],
-            "Charging_Stations_Near_Home": [home_station], "Charging_Stations_Near_Work": [work_station],
-            "Home_Charging_Possible": [home_charge_n], "Environmental_Concern_Level": [concern],
-            "Subsidy_Available": [subsidy_n], "Range_Anxiety_Level": [range_n],
-            "City_Type_Suburban": [city_suburban], "City_Type_Urban": [city_urban],
-            "Current_Car_Type_SUV": [car_suv], "Current_Car_Type_Sedan": [car_sedan],
-            "Current_Car_Type_Truck": [car_truck],
-        })
+            education_level = st.selectbox(
+                "Education Level",
+                sorted(df["education_level"].unique())
+            )
 
-        prediction = model.predict(input_df)
-        probability = model.predict_proba(input_df)
-        buy_prob = probability[0][1]
+            city_type = st.selectbox(
+                "City Type",
+                sorted(df["city_type"].unique())
+            )
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        with st.container(border=True):
-            r1, r2 = st.columns([1, 1])
-            with r1:
-                if prediction[0] == 1:
-                    st.success("✅ Customer is likely to BUY an EV")
-                else:
-                    st.error("❌ Customer is NOT likely to buy an EV")
-                st.progress(int(buy_prob * 100))
-                st.caption(f"Probability of buying: {buy_prob*100:.2f}% · Not buying: {(1-buy_prob)*100:.2f}%")
-            with r2:
-                kc1, kc2 = st.columns(2)
-                kpi(kc1, "🔮", "Buy Probability", f"{buy_prob*100:.1f}%")
-                kpi(kc2, "📊", "Confidence", "High" if abs(buy_prob - 0.5) > 0.3 else "Moderate")
+            current_vehicle_type = st.selectbox(
+                "Current Vehicle Type",
+                sorted(df["current_vehicle_type"].unique())
+            )
+
+            previous_ev_experience = st.selectbox(
+                "Previous EV Experience",
+                ["Yes", "No"]
+            )
+
+        # -------------------------------------------------------
+        # Charging & Travel
+        # -------------------------------------------------------
+        with c2:
+
+            home_charging_available = st.selectbox(
+                "Home Charging Available",
+                ["Yes", "No"]
+            )
+
+            charging_station_accessibility = st.slider(
+                "Charging Station Accessibility",
+                1,
+                10,
+                5
+            )
+
+            nearest_charging_station_km = st.number_input(
+                "Nearest Charging Station (km)",
+                min_value=0.0,
+                value=5.0
+            )
+
+            daily_commute_km = st.number_input(
+                "Daily Commute (km)",
+                min_value=0.0,
+                value=25.0
+            )
+
+            weekly_travel_distance_km = st.number_input(
+                "Weekly Travel Distance (km)",
+                min_value=0.0,
+                value=180.0
+            )
+
+        # -------------------------------------------------------
+        # EV Behaviour
+        # -------------------------------------------------------
+        with c3:
+
+            monthly_energy_consumption_kwh = st.number_input(
+                "Monthly Energy Consumption (kWh)",
+                min_value=0.0,
+                value=300.0
+            )
+
+            monthly_charging_cost = st.number_input(
+                "Monthly Charging Cost",
+                min_value=0.0,
+                value=70.0
+            )
+
+            fuel_expense_per_month = st.number_input(
+                "Monthly Fuel Expense",
+                min_value=0.0,
+                value=150.0
+            )
+
+            electricity_cost_per_kwh = st.number_input(
+                "Electricity Cost / kWh",
+                min_value=0.0,
+                value=0.20,
+                format="%.2f"
+            )
+
+            vehicle_age_years = st.number_input(
+                "Vehicle Age (Years)",
+                min_value=0,
+                value=4
+            )
+
+        st.markdown("---")
+
+        st.markdown(
+            '<div class="chart-card-title">Behaviour & Awareness Scores</div>',
+            unsafe_allow_html=True
+        )
+
+        s1, s2, s3 = st.columns(3)
+
+        with s1:
+
+            environmental_awareness_score = st.slider(
+                "Environmental Awareness",
+                1,
+                10,
+                7
+            )
+
+            government_incentive_awareness = st.slider(
+                "Government Incentive Awareness",
+                1,
+                10,
+                6
+            )
+
+        with s2:
+
+            technology_affinity_score = st.slider(
+                "Technology Affinity",
+                1,
+                10,
+                7
+            )
+
+            ev_knowledge_score = st.slider(
+                "EV Knowledge",
+                1,
+                10,
+                6
+            )
+
+        with s3:
+
+            range_anxiety_score = st.slider(
+                "Range Anxiety",
+                1,
+                10,
+                5
+            )
+
+            battery_replacement_concern = st.slider(
+                "Battery Replacement Concern",
+                1,
+                10,
+                6
+            )
+
+        submitted = st.form_submit_button(
+            "⚡ Predict EV Adoption",
+            use_container_width=True
+        )
+ 
+
+if submitted:
+
+    # ------------------------------------------------------
+    # Create Input DataFrame
+    # ------------------------------------------------------
+
+    input_df = pd.DataFrame({
+
+        "annual_income": [annual_income],
+        "education_level": [education_level],
+        "city_type": [city_type],
+        "current_vehicle_type": [current_vehicle_type],
+        "previous_ev_experience": [previous_ev_experience],
+        "home_charging_available": [home_charging_available],
+        "charging_station_accessibility": [charging_station_accessibility],
+        "nearest_charging_station_km": [nearest_charging_station_km],
+        "daily_commute_km": [daily_commute_km],
+        "weekly_travel_distance_km": [weekly_travel_distance_km],
+        "monthly_energy_consumption_kwh": [monthly_energy_consumption_kwh],
+        "monthly_charging_cost": [monthly_charging_cost],
+        "fuel_expense_per_month": [fuel_expense_per_month],
+        "electricity_cost_per_kwh": [electricity_cost_per_kwh],
+        "vehicle_age_years": [vehicle_age_years],
+        "environmental_awareness_score": [environmental_awareness_score],
+        "government_incentive_awareness": [government_incentive_awareness],
+        "technology_affinity_score": [technology_affinity_score],
+        "ev_knowledge_score": [ev_knowledge_score],
+        "range_anxiety_score": [range_anxiety_score],
+        "battery_replacement_concern": [battery_replacement_concern]
+
+    })
+
+    # ------------------------------------------------------
+    # Feature Engineering
+    # ------------------------------------------------------
+
+    input_df["fuel_expense_per_month"] = input_df[
+        "fuel_expense_per_month"
+    ].clip(lower=0)
+
+    input_df["log_annual_income"] = np.log1p(
+        input_df["annual_income"]
+    )
+
+    input_df["fuel_cost_to_income_ratio"] = (
+        input_df["fuel_expense_per_month"]
+        /
+        (input_df["annual_income"] / 12 + 1)
+    )
+
+    input_df["charging_cost_per_kwh_actual"] = (
+        input_df["monthly_charging_cost"]
+        /
+        (input_df["monthly_energy_consumption_kwh"] + 1)
+    )
+
+    input_df["commute_consistency"] = (
+        input_df["weekly_travel_distance_km"]
+        /
+        (input_df["daily_commute_km"] * 7 + 1)
+    )
+
+    input_df["anxiety_minus_knowledge"] = (
+        input_df["range_anxiety_score"]
+        -
+        input_df["ev_knowledge_score"]
+    )
+
+    input_df["awareness_composite"] = (
+
+        input_df["environmental_awareness_score"]
+
+        +
+
+        input_df["government_incentive_awareness"]
+
+        +
+
+        input_df["technology_affinity_score"]
+
+    ) / 3
+
+    # ------------------------------------------------------
+    # Drop Weak Features
+    # ------------------------------------------------------
+
+    weak_features = [
+
+        "fuel_expense_per_month",
+        "monthly_energy_consumption_kwh",
+        "monthly_charging_cost",
+        "daily_commute_km",
+        "weekly_travel_distance_km",
+        "vehicle_age_years",
+        "electricity_cost_per_kwh"
+
+    ]
+
+    input_df.drop(
+        columns=weak_features,
+        inplace=True
+    )
+
+    # ------------------------------------------------------
+    # One Hot Encoding
+    # ------------------------------------------------------
+
+    input_df = pd.get_dummies(
+
+        input_df,
+
+        columns=[
+
+            "education_level",
+
+            "city_type",
+
+            "current_vehicle_type"
+
+        ],
+
+        drop_first=True
+
+    )
+
+    # ------------------------------------------------------
+    # Match Training Columns
+    # ------------------------------------------------------
+
+    input_df = input_df.reindex(
+
+        columns=feature_columns,
+
+        fill_value=0
+
+    )
+
+    # ------------------------------------------------------
+    # Prediction
+    # ------------------------------------------------------
+
+    prediction = model.predict(input_df)[0]
+
+    probabilities = model.predict_proba(input_df)[0]
+
+    confidence = probabilities.max() * 100
+
+    label_map = {
+
+        0: "Low",
+
+        1: "Medium",
+
+        2: "High"
+
+    }
+
+    predicted_label = label_map[prediction]
+
+    # ------------------------------------------------------
+    # Prediction Card
+    # ------------------------------------------------------
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    with st.container(border=True):
+
+        left, right = st.columns([1, 1])
+
+        with left:
+
+            if predicted_label == "High":
+
+                st.success("🟢 High EV Adoption Likelihood")
+
+            elif predicted_label == "Medium":
+
+                st.warning("🟡 Medium EV Adoption Likelihood")
+
+            else:
+
+                st.error("🔴 Low EV Adoption Likelihood")
+
+            st.progress(int(confidence))
+
+            st.caption(
+                f"Prediction Confidence: {confidence:.2f}%"
+            )
+
+        with right:
+
+            k1, k2 = st.columns(2)
+
+            kpi(
+                k1,
+                "⚡",
+                "Prediction",
+                predicted_label
+            )
+
+            kpi(
+                k2,
+                "🎯",
+                "Confidence",
+                f"{confidence:.1f}%"
+            )
+
+    # ------------------------------------------------------
+    # Probability Chart
+    # ------------------------------------------------------
+
+    st.markdown("### Class Probabilities")
+
+    prob_df = pd.DataFrame({
+
+        "Likelihood": [
+
+            "Low",
+
+            "Medium",
+
+            "High"
+
+        ],
+
+        "Probability": probabilities * 100
+
+    })
+
+    fig = px.bar(
+
+        prob_df,
+
+        x="Likelihood",
+
+        y="Probability",
+
+        text="Probability",
+
+        color="Likelihood",
+
+        color_discrete_map={
+
+            "Low": "#EF4444",
+
+            "Medium": "#F59E0B",
+
+            "High": MINT
+
+        },
+
+        template=PLOT_TEMPLATE
+
+    )
+
+    fig.update_traces(
+
+        texttemplate="%{text:.1f}%",
+
+        textposition="outside"
+
+    )
+
+    fig = chart_layout(
+
+        fig,
+
+        showlegend=False
+
+    )
+
+    st.plotly_chart(
+
+        fig,
+
+        use_container_width=True
+
+    )
+
+    # ------------------------------------------------------
+    # Recommendation
+    # ------------------------------------------------------
+
+    st.markdown("### Recommendation")
+
+    if predicted_label == "High":
+
+        st.success("""
+
+The customer is highly likely to adopt an EV.
+
+Reasons:
+
+• Strong environmental awareness
+
+• Good charging accessibility
+
+• High EV knowledge
+
+• Positive technology affinity
+
+Keep promoting home charging and government incentives.
+
+""")
+
+    elif predicted_label == "Medium":
+
+        st.info("""
+
+The customer has a moderate likelihood of adopting an EV.
+
+Recommendations:
+
+• Improve EV awareness
+
+• Increase charging accessibility
+
+• Highlight long-term fuel savings
+
+• Educate about government incentives
+
+""")
+
+    else:
+
+        st.error("""
+
+The customer currently has a low likelihood of adopting an EV.
+
+Recommendations:
+
+• Reduce range anxiety
+
+• Improve charging infrastructure
+
+• Increase EV awareness
+
+• Educate about battery life and incentives
+
+""")
+
 
 # ==================================================================
 # PAGE 6: AI ASSISTANT
@@ -625,38 +1268,104 @@ with tab_predict:
 with tab_ai:
     page_header("EV AI Assistant", "Ask anything about EV adoption — answers reflect your current sidebar filters.")
 
-    @st.cache_data
-    def build_context(data):
-        if data.empty:
-            return "No records match the current filters."
-        buy_rate = (data["Will_Buy_EV"] == "Yes").mean() * 100
-        return f"""
+@st.cache_data
+def build_context(data):
+
+    if data.empty:
+        return "No records match the current filters."
+
+    adoption_rate = (data[TARGET] == "High").mean() * 100
+
+    return f"""
 Records in current view: {len(data):,}
-Overall EV purchase rate in this view: {buy_rate:.1f}%
-Purchase rate by range anxiety: {data.groupby('Range_Anxiety_Level')['Will_Buy_EV'].apply(lambda s: (s=='Yes').mean()*100).round(1).to_dict()}
-Purchase rate by city type: {data.groupby('City_Type')['Will_Buy_EV'].apply(lambda s: (s=='Yes').mean()*100).round(1).to_dict()}
-Purchase rate by subsidy availability: {data.groupby('Subsidy_Available')['Will_Buy_EV'].apply(lambda s: (s=='Yes').mean()*100).round(1).to_dict()}
-Avg annual income: ${data['Annual_Income_USD'].mean():,.0f}
-Avg daily commute: {data['Daily_Commute_km'].mean():.1f} km
-Top predictive features from the trained XGBoost model: Subsidy_Available, Environmental_Concern_Level, Range_Anxiety_Level, Annual_Income_USD, City_Type_Urban.
+
+High EV Adoption Likelihood: {adoption_rate:.1f}%
+
+Average Annual Income: ${data["annual_income"].mean():,.0f}
+
+Average Awareness Composite:
+{data["awareness_composite"].mean():.2f}
+
+Average Range Anxiety Score:
+{data["range_anxiety_score"].mean():.2f}
+
+Average Charging Accessibility:
+{data["charging_station_accessibility"].mean():.2f}
+
+Previous EV Experience:
+{data["previous_ev_experience"].value_counts().to_dict()}
+
+Home Charging Availability:
+{data["home_charging_available"].value_counts().to_dict()}
+
+Education Distribution:
+{data["education_level"].value_counts().to_dict()}
+
+City Distribution:
+{data["city_type"].value_counts().to_dict()}
+
+Current Vehicle Types:
+{data["current_vehicle_type"].value_counts().to_dict()}
+
+Top CatBoost Features:
+
+1. anxiety_minus_knowledge
+
+2. awareness_composite
+
+3. charging_station_accessibility
+
+4. battery_replacement_concern
+
+5. home_charging_available
+
+6. environmental_awareness_score
+
+7. previous_ev_experience
+
+8. nearest_charging_station_km
+
+9. range_anxiety_score
+
+10. technology_affinity_score
 """.strip()
 
-    with st.form("ai_form"):
+with st.form("ai_form"):
         question = st.text_area("Your question")
         ask = st.form_submit_button("Ask AI")
 
-    if ask:
+if ask:
         if not question.strip():
             st.warning("Type a question first.")
         else:
             context = build_context(fdf)
-            prompt = f"""You are an EV data analyst. Answer using only this data summary. Be concise and specific.
+            prompt = f"""
+You are an AI EV Adoption Consultant.
 
-DATA SUMMARY:
+Answer ONLY using the dashboard summary below.
+
+If the user asks for insights:
+
+- Explain the dashboard.
+- Explain EV adoption behaviour.
+- Explain why certain factors influence EV adoption.
+- Explain the CatBoost prediction.
+- Explain feature importance.
+- Explain charging accessibility.
+- Explain awareness composite.
+
+If the user asks something unrelated to EV adoption or the dashboard, politely say you can only answer EV-related dashboard questions.
+
+Dashboard Summary
+
 {context}
 
-USER QUESTION:
-{question}"""
+User Question
+
+{question}
+"""
+
+
 
             models_to_try = [
                 "meta-llama/llama-3.3-70b-instruct:free",
@@ -682,17 +1391,3 @@ USER QUESTION:
                     st.success(answer)
                 else:
                     st.error(f"All models are currently rate-limited. Try again shortly. ({last_error})")
-
-# ==================================================================
-# PAGE 7: EXPLORE DATA
-# ==================================================================
-with tab_data:
-    page_header("Explore the Raw Data", "Drill into individual records within your current sidebar filters.")
-
-    buy_sel = st.selectbox("Further narrow by: Will Buy EV", ["All", "Yes", "No"])
-    view = fdf if buy_sel == "All" else fdf[fdf["Will_Buy_EV"] == buy_sel]
-
-    st.caption(f"Showing {len(view):,} of {len(df):,} total records")
-    st.dataframe(view, use_container_width=True, height=420)
-    csv = view.to_csv(index=False).encode("utf-8")
-    st.download_button("⬇ Download This View as CSV", csv, "filtered_ev_data.csv", "text/csv")
