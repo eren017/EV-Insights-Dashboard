@@ -386,29 +386,64 @@ with tab_home:
                 st.plotly_chart(fig, use_container_width=True, key="home_pie")
         with c2:
             with st.container(border=True):
-                st.markdown('<div class="chart-card-title">What Actually Separates Adopters From Skeptics</div>', unsafe_allow_html=True)
+
+                st.markdown(
+                    '<div class="chart-card-title">What Actually Separates Adopters From Skeptics</div>',
+                    unsafe_allow_html=True,
+                    )
+
                 compare_cols = {
             "EV Knowledge": "ev_knowledge_score",
             "Awareness Composite": "awareness_composite",
             "Range Anxiety (lower = better)": "range_anxiety_score",
             "Anxiety − Knowledge Gap (lower = better)": "anxiety_minus_knowledge",
         }
-        rows = []
-        for label, col in compare_cols.items():
-            high_val = fdf.loc[fdf.ev_adoption_likelihood == "High", col].mean()
-            low_val = fdf.loc[fdf.ev_adoption_likelihood == "Low", col].mean()
-            rows.append({"Factor": label, "High Adopters": high_val, "Low Adopters": low_val})
-        comp_df = pd.DataFrame(rows)
-        fig = go.Figure()
-        fig.add_bar(name="High Adopters", y=comp_df["Factor"], x=comp_df["High Adopters"],
-                    orientation="h", marker_color=MINT)
-        fig.add_bar(name="Low Adopters", y=comp_df["Factor"], x=-comp_df["Low Adopters"],
-                    orientation="h", marker_color=ORANGE)
-        fig.update_layout(barmode="overlay", legend_title="", xaxis_title="← Low Adopters   |   High Adopters →")
-        fig = chart_layout(fig, height=320)
-        st.plotly_chart(fig, use_container_width=True, key="home_diverging")
-        st.caption("The Anxiety−Knowledge gap shows the widest split of any single factor — it's doing more work than either component alone.")
 
+                rows = []
+
+                for label, col in compare_cols.items():
+                    high_val = fdf.loc[fdf["ev_adoption_likelihood"] == "High", col].mean()
+                    low_val = fdf.loc[fdf["ev_adoption_likelihood"] == "Low", col].mean()
+
+                    rows.append({
+                    "Factor": label,
+                    "High Adopters": high_val,
+                    "Low Adopters": low_val
+            })
+
+                comp_df = pd.DataFrame(rows)
+
+                fig = go.Figure()
+
+                fig.add_bar(
+                name="High Adopters",
+                y=comp_df["Factor"],
+                x=comp_df["High Adopters"],
+                orientation="h",
+                marker_color=MINT,
+        )
+
+                fig.add_bar(
+                name="Low Adopters",
+                y=comp_df["Factor"],
+                x=-comp_df["Low Adopters"],
+                orientation="h",
+                marker_color=ORANGE,
+        )
+
+                fig.update_layout(
+                barmode="overlay",
+                legend_title="",
+                xaxis_title="← Low Adopters   |   High Adopters →",
+        )
+
+                fig = chart_layout(fig, height=320)
+
+                st.plotly_chart(fig, use_container_width=True)
+
+                st.caption(
+            "The Anxiety−Knowledge gap shows the widest split of any single factor."
+        )
 # ==================================================================
 # PAGE 2: DEMOGRAPHICS
 # ==================================================================
@@ -421,58 +456,27 @@ with tab_demo:
             with st.container(border=True):
                 st.markdown('<div class="chart-card-title">Income Bracket vs Adoption Rate</div>', unsafe_allow_html=True)
                 tmp = fdf.groupby("Income_Bracket", observed=True)["ev_adoption_likelihood"].apply(
-                    lambda s: (s == "High").mean() * 100
+                lambda s: (s == "High").mean() * 100
                 ).reindex(income_order).reset_index()
                 tmp.columns = ["Income Bracket", "% High Adoption"]
-                fig = px.bar(tmp, x="Income Bracket", y="% High Adoption", text="% High Adoption",
-                             color_discrete_sequence=[MINT], template=PLOT_TEMPLATE)
-                fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+                fig = px.line(tmp, x="Income Bracket", y="% High Adoption", markers=True,
+                      text="% High Adoption", color_discrete_sequence=[MINT], template=PLOT_TEMPLATE)
+                fig.update_traces(texttemplate="%{text:.1f}%", textposition="top center",
+                           line=dict(width=3), marker=dict(size=9))
                 fig.update_yaxes(range=[0, 100])
                 fig = chart_layout(fig)
                 st.plotly_chart(fig, use_container_width=True, key="demo_income_rate")
                 st.caption("32% → 90% across brackets — your strongest demographic lever, by a wide margin.")
         with c2:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">City Type vs Adoption Rate</div>', unsafe_allow_html=True)
-                tmp = fdf.groupby("city_type")["ev_adoption_likelihood"].apply(lambda s: (s == "High").mean() * 100).reset_index()
-                tmp.columns = ["City Type", "% High Adoption"]
-                fig = px.bar(tmp, x="City Type", y="% High Adoption", text="% High Adoption", color="City Type",
-                             color_discrete_sequence=PALETTE_NEUTRAL, template=PLOT_TEMPLATE)
-                fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
-                fig.update_yaxes(range=[0, 100])
-                fig = chart_layout(fig, showlegend=False)
-                st.plotly_chart(fig, use_container_width=True, key="demo_city_rate")
-                st.caption("Urban leads at 65% vs ~55% Rural/Suburban — real, but modest next to income.")
+            adoption_rate_by_band(
+                        fdf.assign(Battery_Concern_Band=pd.cut(
+                        fdf["battery_replacement_concern"], bins=[0, 3, 7, 10],
+                        labels=["Low", "Medium", "High"], include_lowest=True
+                    )),
+                        "Battery_Concern_Band", "Battery Replacement Concern vs Adoption", key="demo_battery"
+                )
 
-        c3, c4 = st.columns(2)
-        with c3:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Age Group vs Adoption Rate — No Effect</div>', unsafe_allow_html=True)
-                tmp = fdf.groupby("Age_Group", observed=True)["ev_adoption_likelihood"].apply(
-                    lambda s: (s == "High").mean() * 100
-                ).reindex(["18-25", "26-35", "36-45", "46-55", "56-65", "65+"]).reset_index()
-                tmp.columns = ["Age Group", "% High Adoption"]
-                fig = px.bar(tmp, x="Age Group", y="% High Adoption", text="% High Adoption",
-                             color_discrete_sequence=[GRAY_MID], template=PLOT_TEMPLATE)
-                fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
-                fig.update_yaxes(range=[0, 100])
-                fig = chart_layout(fig)
-                st.plotly_chart(fig, use_container_width=True, key="demo_age_flat")
-                st.caption("58.8%–59.9% across every age band — essentially flat. Age-based targeting won't move adoption.")
-        with c4:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Education Level vs Adoption Rate — No Effect</div>', unsafe_allow_html=True)
-                tmp = fdf.groupby("education_level")["ev_adoption_likelihood"].apply(
-                    lambda s: (s == "High").mean() * 100
-                ).reindex(["High School", "Bachelor", "Master", "PhD", "Unknown"]).reset_index()
-                tmp.columns = ["Education Level", "% High Adoption"]
-                fig = px.bar(tmp, x="Education Level", y="% High Adoption", text="% High Adoption",
-                             color_discrete_sequence=[GRAY_MID], template=PLOT_TEMPLATE)
-                fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
-                fig.update_yaxes(range=[0, 100])
-                fig = chart_layout(fig)
-                st.plotly_chart(fig, use_container_width=True, key="demo_edu_flat")
-                st.caption("57.2%–59.6% across every education level — no meaningful pattern. Same conclusion: not a useful targeting axis.")
+        
 # ==================================================================
 # PAGE 3: CHARGING INFRASTRUCTURE
 # ==================================================================
@@ -524,10 +528,17 @@ with tab_charge:
                 st.markdown('<div class="chart-card-title">Charging Cost vs Energy Consumption</div>', unsafe_allow_html=True)
                 sample = fdf.sample(min(3000, len(fdf)), random_state=42)
                 fig = px.scatter(sample, x="monthly_energy_consumption_kwh", y="monthly_charging_cost",
-                                  color_discrete_sequence=[MINT], opacity=0.5, trendline="ols",
-                                  trendline_color_override=ORANGE, template=PLOT_TEMPLATE)
+                          color="electricity_cost_per_kwh", color_continuous_scale=["#6B7280", MINT],
+                          opacity=0.6, trendline="ols", trendline_color_override=ORANGE,
+                          template=PLOT_TEMPLATE, labels={"electricity_cost_per_kwh": "$/kWh"})
                 fig = chart_layout(fig, xaxis_title="Monthly Energy (kWh)", yaxis_title="Monthly Charging Cost ($)")
+                fig.update_layout(coloraxis_colorbar=dict(title="$/kWh", thickness=12))
                 st.plotly_chart(fig, use_container_width=True, key="charge_scatter")
+                st.caption(
+"As monthly energy consumption increases, charging costs also rise. "
+"However, users with similar energy usage can still pay different amounts because "
+"electricity prices vary across regions."
+)
 
 # ==================================================================
 # PAGE 4: EV INSIGHTS
@@ -807,6 +818,28 @@ User Question
                         continue
 
                 if answer:
-                    st.success(answer)
+                    st.markdown("""
+                    <style>.ai-response{
+                    background:#111417;
+                    border:1px solid rgba(82,242,198,0.25);
+                    border-radius:18px;
+                    padding:20px;
+                    color:white;
+                    font-size:17px;
+                    line-height:1.8;
+                    margin-top:15px;
+                    }
+                    </style>
+                    """, unsafe_allow_html=True)
+
+                    st.markdown(
+                    f"""
+                    <div class="ai-response">
+                    <h4 style="color:#52F2C6;">🤖 AI Response</h4>
+                    {answer}
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                    )
                 else:
                     st.error(f"All models are currently rate-limited. Try again shortly. ({last_error})")

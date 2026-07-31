@@ -386,100 +386,58 @@ with tab_home:
                 st.plotly_chart(fig, use_container_width=True, key="home_pie")
         with c2:
             with st.container(border=True):
+                st.markdown('<div class="chart-card-title">What Separates Adopters From Skeptics</div>', unsafe_allow_html=True)
+                st.markdown("<br>", unsafe_allow_html=True)
+                drivers = [
+                    ("EV Knowledge Score", fdf[fdf.ev_adoption_likelihood=="High"]["ev_knowledge_score"].mean(),
+                     fdf[fdf.ev_adoption_likelihood=="Low"]["ev_knowledge_score"].mean()),
+                    ("Environmental Awareness", fdf[fdf.ev_adoption_likelihood=="High"]["environmental_awareness_score"].mean(),
+                     fdf[fdf.ev_adoption_likelihood=="Low"]["environmental_awareness_score"].mean()),
+                    ("Range Anxiety (lower is better)", fdf[fdf.ev_adoption_likelihood=="High"]["range_anxiety_score"].mean(),
+                     fdf[fdf.ev_adoption_likelihood=="Low"]["range_anxiety_score"].mean()),
+                ]
+                for name, high_val, low_val in drivers:
+                    st.markdown(f"**{name}**")
+                    b1, b2 = st.columns(2)
+                    b1.markdown(f"<span style='color:{MINT};font-weight:800;'>High adopters: {high_val:.1f}</span>", unsafe_allow_html=True)
+                    b2.markdown(f"<span style='color:{ORANGE};font-weight:800;'>Low adopters: {low_val:.1f}</span>", unsafe_allow_html=True)
+                    st.markdown("<div style='margin-bottom:14px;'></div>", unsafe_allow_html=True)
 
-                st.markdown(
-                    '<div class="chart-card-title">What Actually Separates Adopters From Skeptics</div>',
-                    unsafe_allow_html=True,
-                    )
-
-                compare_cols = {
-            "EV Knowledge": "ev_knowledge_score",
-            "Awareness Composite": "awareness_composite",
-            "Range Anxiety (lower = better)": "range_anxiety_score",
-            "Anxiety − Knowledge Gap (lower = better)": "anxiety_minus_knowledge",
-        }
-
-                rows = []
-
-                for label, col in compare_cols.items():
-                    high_val = fdf.loc[fdf["ev_adoption_likelihood"] == "High", col].mean()
-                    low_val = fdf.loc[fdf["ev_adoption_likelihood"] == "Low", col].mean()
-
-                    rows.append({
-                    "Factor": label,
-                    "High Adopters": high_val,
-                    "Low Adopters": low_val
-            })
-
-                comp_df = pd.DataFrame(rows)
-
-                fig = go.Figure()
-
-                fig.add_bar(
-                name="High Adopters",
-                y=comp_df["Factor"],
-                x=comp_df["High Adopters"],
-                orientation="h",
-                marker_color=MINT,
-        )
-
-                fig.add_bar(
-                name="Low Adopters",
-                y=comp_df["Factor"],
-                x=-comp_df["Low Adopters"],
-                orientation="h",
-                marker_color=ORANGE,
-        )
-
-                fig.update_layout(
-                barmode="overlay",
-                legend_title="",
-                xaxis_title="← Low Adopters   |   High Adopters →",
-        )
-
-                fig = chart_layout(fig, height=320)
-
-                st.plotly_chart(fig, use_container_width=True)
-
-                st.caption(
-            "The Anxiety−Knowledge gap shows the widest split of any single factor."
-        )
 # ==================================================================
 # PAGE 2: DEMOGRAPHICS
 # ==================================================================
 with tab_demo:
-    page_header("Buyer Demographics", "Which demographic cuts predict adoption — and which ones you can stop targeting.")
+    page_header("Buyer Demographics", "Who adopts EVs — broken down by age, income, and education.")
 
     if not fdf.empty:
         c1, c2 = st.columns(2)
         with c1:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Income Bracket vs Adoption Rate</div>', unsafe_allow_html=True)
-                tmp = fdf.groupby("Income_Bracket", observed=True)["ev_adoption_likelihood"].apply(
-                    lambda s: (s == "High").mean() * 100
-                ).reindex(income_order).reset_index()
-                tmp.columns = ["Income Bracket", "% High Adoption"]
-                fig = px.bar(tmp, x="Income Bracket", y="% High Adoption", text="% High Adoption",
-                             color_discrete_sequence=[MINT], template=PLOT_TEMPLATE)
-                fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
-                fig.update_yaxes(range=[0, 100])
-                fig = chart_layout(fig)
-                st.plotly_chart(fig, use_container_width=True, key="demo_income_rate")
-                st.caption("32% → 90% across brackets — your strongest demographic lever, by a wide margin.")
+            adoption_rate_by_band(
+            fdf.assign(Battery_Concern_Band=pd.cut(
+            fdf["battery_replacement_concern"], bins=[0, 3, 7, 10],
+            labels=["Low", "Medium", "High"], include_lowest=True
+        )),
+            "Battery_Concern_Band", "Battery Replacement Concern vs Adoption", key="demo_battery"
+    )
         with c2:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">City Type vs Adoption Rate</div>', unsafe_allow_html=True)
-                tmp = fdf.groupby("city_type")["ev_adoption_likelihood"].apply(lambda s: (s == "High").mean() * 100).reset_index()
-                tmp.columns = ["City Type", "% High Adoption"]
-                fig = px.bar(tmp, x="City Type", y="% High Adoption", text="% High Adoption", color="City Type",
-                             color_discrete_sequence=PALETTE_NEUTRAL, template=PLOT_TEMPLATE)
-                fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
-                fig.update_yaxes(range=[0, 100])
-                fig = chart_layout(fig, showlegend=False)
-                st.plotly_chart(fig, use_container_width=True, key="demo_city_rate")
-                st.caption("Urban leads at 65% vs ~55% Rural/Suburban — real, but modest next to income.")
+            stacked_mix_chart(fdf, "Income_Bracket", "Income Bracket vs Adoption Mix",
+                               order=income_order, key="demo_income")
 
-        
+        c3, c4 = st.columns(2)
+        with c3:
+            stacked_mix_chart(fdf, "education_level", "Education Level vs Adoption Mix",
+                               order=["High School", "Bachelor", "Master", "PhD", "Unknown"], key="demo_edu")
+        with c4:
+            with st.container(border=True):
+                st.markdown('<div class="chart-card-title">City Type Distribution</div>', unsafe_allow_html=True)
+                tmp = fdf["city_type"].value_counts().reset_index()
+                tmp.columns = ["City Type", "Count"]
+                fig = px.pie(tmp, names="City Type", values="Count", hole=0.55,
+                             color_discrete_sequence=PALETTE_NEUTRAL, template=PLOT_TEMPLATE)
+                fig.update_traces(textinfo="percent+label")
+                fig = chart_layout(fig, showlegend=False)
+                st.plotly_chart(fig, use_container_width=True, key="demo_city_donut")
+
 # ==================================================================
 # PAGE 3: CHARGING INFRASTRUCTURE
 # ==================================================================
@@ -499,22 +457,7 @@ with tab_charge:
                 fig = chart_layout(fig, showlegend=False)
                 st.plotly_chart(fig, use_container_width=True, key="charge_home_donut")
         with c2:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Charging Accessibility × Home Charging</div>', unsafe_allow_html=True)
-                tmp = fdf.copy()
-                tmp["Accessibility"] = pd.cut(tmp["charging_station_accessibility"], [0, 3, 7, 10], labels=["Low", "Medium", "High"], include_lowest=True)
-                tmp["Home Charging"] = tmp["home_charging_available"].map({1: "Yes", 0: "No"})
-                g = tmp.groupby(["Accessibility", "Home Charging"], observed=True)["ev_adoption_likelihood"].apply(
-                lambda s: (s == "High").mean() * 100
-                ).reset_index()
-                g.columns = ["Accessibility", "Home Charging", "% High Adoption"]
-                fig = px.bar(g, x="Accessibility", y="% High Adoption", color="Home Charging", barmode="group",
-                     text="% High Adoption", color_discrete_map={"Yes": MINT, "No": ORANGE}, template=PLOT_TEMPLATE,
-                     category_orders={"Accessibility": ["Low", "Medium", "High"]})
-                fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
-                fig = chart_layout(fig)
-                st.plotly_chart(fig, use_container_width=True, key="charge_access_combo")
-                st.caption("Public accessibility and home charging compound — 70.7% adoption when both are strong, vs 36.6% when neither is.")
+            adoption_rate_by_band(fdf, "Charging_Access_Band", "Adoption Rate by Charging Accessibility", key="charge_access_band")
 
         c3, c4 = st.columns(2)
         with c3:
@@ -540,54 +483,30 @@ with tab_charge:
 # PAGE 4: EV INSIGHTS
 # ==================================================================
 with tab_insights:
-    page_header("Adoption Drivers", "Why people adopt — and why they don't.")
+    page_header("Adoption Drivers", "The psychological and awareness factors that move the needle most.")
 
     if not fdf.empty:
-        with st.container(border=True):
-            st.markdown('<div class="chart-card-title">Range Anxiety × EV Knowledge — Adoption Rate Matrix</div>', unsafe_allow_html=True)
-            df_m = fdf.copy()
-            df_m["Anxiety"] = pd.cut(df_m["range_anxiety_score"], [0, 3, 7, 10], labels=["Low", "Medium", "High"], include_lowest=True)
-            df_m["Knowledge"] = pd.cut(df_m["ev_knowledge_score"], [0, 3, 7, 10], labels=["Low", "Medium", "High"], include_lowest=True)
-            matrix = df_m.groupby(["Anxiety", "Knowledge"], observed=True)["ev_adoption_likelihood"].apply(
-                lambda s: (s == "High").mean() * 100
-            ).unstack().reindex(index=["High", "Medium", "Low"], columns=["Low", "Medium", "High"])
-            fig = px.imshow(matrix, text_auto=".0f", color_continuous_scale=[[0, ORANGE], [0.5, "#15181c"], [1, MINT]],
-                             template=PLOT_TEMPLATE, aspect="auto", labels=dict(color="% High Adoption"))
-            fig.update_layout(xaxis_title="EV Knowledge", yaxis_title="Range Anxiety")
-            fig = chart_layout(fig, height=340)
-            st.plotly_chart(fig, use_container_width=True, key="ins_matrix")
-            st.caption("Knowledge overcomes anxiety, not the other way around — high-anxiety/high-knowledge respondents still adopt at ~37%, while high-anxiety/low-knowledge sits near 0%.")
-
         c1, c2 = st.columns(2)
         with c1:
-            with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Awareness Composite vs Adoption</div>', unsafe_allow_html=True)
-                tmp = fdf.copy()
-                tmp["Awareness (quartile)"] = pd.qcut(tmp["awareness_composite"], 4, duplicates="drop").astype(str)
-                g = tmp.groupby("Awareness (quartile)")["ev_adoption_likelihood"].apply(lambda s: (s == "High").mean() * 100).reset_index()
-                g.columns = ["Awareness (quartile)", "% High Adoption"]
-                fig = px.bar(g, x="Awareness (quartile)", y="% High Adoption", text="% High Adoption",
-                             color_discrete_sequence=[MINT], template=PLOT_TEMPLATE)
-                fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
-                fig = chart_layout(fig)
-                st.plotly_chart(fig, use_container_width=True, key="ins_awareness")
-                st.caption("Environmental, tech, and incentive awareness move together — the composite score is a stronger single lever than any one of them alone.")
+            adoption_rate_by_band(fdf, "Env_Awareness_Band", "Environmental Awareness vs Adoption", key="ins_env")
         with c2:
+            adoption_rate_by_band(fdf, "Tech_Affinity_Band", "Technology Affinity vs Adoption", key="ins_tech")
+
+        c3, c4 = st.columns(2)
+        with c3:
+            adoption_rate_by_band(fdf, "Gov_Incentive_Band", "Govt. Incentive Awareness vs Adoption", key="ins_gov")
+        with c4:
             with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Previous EV Experience × Home Charging</div>', unsafe_allow_html=True)
-                tmp = fdf.copy()
-                tmp["Prior Experience"] = tmp["previous_ev_experience"].map({1: "Yes", 0: "No"})
-                tmp["Home Charging"] = tmp["home_charging_available"].map({1: "Yes", 0: "No"})
-                g = tmp.groupby(["Prior Experience", "Home Charging"])["ev_adoption_likelihood"].apply(
+                st.markdown('<div class="chart-card-title">Previous EV Experience vs Adoption</div>', unsafe_allow_html=True)
+                tmp = fdf.groupby(fdf["previous_ev_experience"].map({1: "Yes", 0: "No"}))["ev_adoption_likelihood"].apply(
                     lambda s: (s == "High").mean() * 100
                 ).reset_index()
-                g.columns = ["Prior Experience", "Home Charging", "% High Adoption"]
-                fig = px.bar(g, x="Prior Experience", y="% High Adoption", color="Home Charging", barmode="group",
-                             text="% High Adoption", color_discrete_map={"Yes": MINT, "No": ORANGE}, template=PLOT_TEMPLATE)
+                tmp.columns = ["Previous EV Experience", "High Adoption Rate (%)"]
+                fig = px.bar(tmp, x="Previous EV Experience", y="High Adoption Rate (%)", text="High Adoption Rate (%)",
+                             color="Previous EV Experience", color_discrete_map={"Yes": MINT, "No": ORANGE}, template=PLOT_TEMPLATE)
                 fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
-                fig = chart_layout(fig)
-                st.plotly_chart(fig, use_container_width=True, key="ins_exp_charging")
-                st.caption("The two enablers stack: prior experience plus home charging (69.2%) beats either alone.")
+                fig = chart_layout(fig, showlegend=False)
+                st.plotly_chart(fig, use_container_width=True, key="ins_prev_exp")
 
 # ==================================================================
 # PAGE 5: FEATURE IMPORTANCE
@@ -629,90 +548,200 @@ with tab_predict:
         with col_b:
             st.markdown("**Commute & Vehicle**")
             daily_commute = st.number_input("Daily Commute (km)", min_value=0, max_value=200, value=30)
-            weekly_travel = st.number_input("Weekly Travel Distance (km)", min_value=1, max_value=1500, value=210)
+            weekly_travel = st.number_input("Weekly Travel Distance (km)", min_value=1, max_value=1500, value=210,
+                                             help="Should be roughly 7x daily commute if travel is consistent day to day.")
             education = st.selectbox("Education Level", ["High School", "Bachelor", "Master", "PhD", "Unknown"])
             city = st.selectbox("City Type", ["Rural", "Suburban", "Urban"])
             vehicle = st.selectbox("Current Vehicle Type", ["Hatchback", "Sedan", "SUV", "Truck"])
 
         with col_c:
             st.markdown("**Awareness & Charging Access**")
-            env_awareness = st.slider("Environmental Awareness", 1, 10, 6)
-            tech_affinity = st.slider("Technology Affinity", 1, 10, 6)
-            gov_awareness = st.slider("Government Incentive Awareness", 1, 10, 6)
-            range_anxiety = st.slider("Range Anxiety", 1, 10, 5)
-            battery_concern = st.slider("Battery Replacement Concern", 1, 10, 5)
-            ev_knowledge = st.slider("EV Knowledge Score", 1, 10, 6)
-            charging_access = st.slider("Charging Station Accessibility", 1, 10, 5)
+            env_awareness = st.slider("Environmental Awareness", 1, 10, 6, help="1 = not aware at all, 10 = extremely aware")
+            tech_affinity = st.slider("Technology Affinity", 1, 10, 6, help="1 = avoids new tech, 10 = early adopter")
+            gov_awareness = st.slider("Government Incentive Awareness", 1, 10, 6, help="1 = unaware of subsidies/tax breaks, 10 = fully informed")
+            range_anxiety = st.slider("Range Anxiety", 1, 10, 5, help="1 = no concern about running out of charge, 10 = very anxious")
+            battery_concern = st.slider("Battery Replacement Concern", 1, 10, 5, help="1 = not worried about battery lifespan/cost, 10 = major concern")
+            ev_knowledge = st.slider("EV Knowledge Score", 1, 10, 6, help="1 = knows very little about EVs, 10 = highly knowledgeable")
+            charging_access = st.slider("Charging Station Accessibility", 1, 10, 5, help="1 = very hard to find chargers nearby, 10 = chargers everywhere")
             nearest_km = st.number_input("Distance to Nearest Charger (km)", min_value=0.0, max_value=100.0, value=6.0)
             home_charging = st.selectbox("Home Charging Available", ["Yes", "No"])
             prev_experience = st.selectbox("Previous EV Experience", ["Yes", "No"])
 
         submitted = st.form_submit_button("🔮 Predict Adoption Likelihood", use_container_width=True)
 
+    # ---- sanity check on commute consistency, shown regardless of submit ----
+    expected_weekly = daily_commute * 7 if 'daily_commute' in dir() else None
+
     if submitted:
-        row = {
-            "annual_income": income,
-            "charging_station_accessibility": charging_access,
-            "nearest_charging_station_km": nearest_km,
-            "home_charging_available": 1 if home_charging == "Yes" else 0,
-            "environmental_awareness_score": env_awareness,
-            "government_incentive_awareness": gov_awareness,
-            "technology_affinity_score": tech_affinity,
-            "range_anxiety_score": range_anxiety,
-            "battery_replacement_concern": battery_concern,
-            "ev_knowledge_score": ev_knowledge,
-            "previous_ev_experience": 1 if prev_experience == "Yes" else 0,
-            "log_annual_income": np.log1p(income),
-            "log_monthly_charging_cost": np.log1p(charging_cost),
-            "fuel_cost_to_income_ratio": (fuel_expense * 12) / income,
-            "charging_cost_per_kwh_actual": charging_cost / energy_kwh,
-            "commute_consistency": (daily_commute * 7) / weekly_travel,
-            "anxiety_minus_knowledge": range_anxiety - ev_knowledge,
-            "awareness_composite": np.mean([env_awareness, tech_affinity, gov_awareness]),
-            "education_level_High School": 1 if education == "High School" else 0,
-            "education_level_Master": 1 if education == "Master" else 0,
-            "education_level_PhD": 1 if education == "PhD" else 0,
-            "education_level_Unknown": 1 if education == "Unknown" else 0,
-            "city_type_Suburban": 1 if city == "Suburban" else 0,
-            "city_type_Urban": 1 if city == "Urban" else 0,
-            "current_vehicle_type_SUV": 1 if vehicle == "SUV" else 0,
-            "current_vehicle_type_Sedan": 1 if vehicle == "Sedan" else 0,
-            "current_vehicle_type_Truck": 1 if vehicle == "Truck" else 0,
-        }
-        input_df = pd.DataFrame([row])[model.feature_names_]
+        try:
+            # soft data-quality warning — doesn't block prediction, just flags it
+            if weekly_travel > 0 and abs(daily_commute * 7 - weekly_travel) / weekly_travel > 0.5:
+                st.warning(
+                    f"⚠️ Daily commute × 7 ({daily_commute*7:.0f} km) is quite different from weekly travel "
+                    f"distance ({weekly_travel} km) — double check these are consistent before trusting the result."
+                )
 
-        pred_idx = int(model.predict(input_df)[0][0])
-        pred_label = CLASS_MAP[pred_idx]
-        proba = model.predict_proba(input_df)[0]
+            row = {
+                "annual_income": income,
+                "charging_station_accessibility": charging_access,
+                "nearest_charging_station_km": nearest_km,
+                "home_charging_available": 1 if home_charging == "Yes" else 0,
+                "environmental_awareness_score": env_awareness,
+                "government_incentive_awareness": gov_awareness,
+                "technology_affinity_score": tech_affinity,
+                "range_anxiety_score": range_anxiety,
+                "battery_replacement_concern": battery_concern,
+                "ev_knowledge_score": ev_knowledge,
+                "previous_ev_experience": 1 if prev_experience == "Yes" else 0,
+                "log_annual_income": np.log1p(income),
+                "log_monthly_charging_cost": np.log1p(charging_cost),
+                "fuel_cost_to_income_ratio": (fuel_expense * 12) / income,
+                "charging_cost_per_kwh_actual": charging_cost / energy_kwh,
+                "commute_consistency": (daily_commute * 7) / weekly_travel,
+                "anxiety_minus_knowledge": range_anxiety - ev_knowledge,
+                "awareness_composite": np.mean([env_awareness, tech_affinity, gov_awareness]),
+                "education_level_High School": 1 if education == "High School" else 0,
+                "education_level_Master": 1 if education == "Master" else 0,
+                "education_level_PhD": 1 if education == "PhD" else 0,
+                "education_level_Unknown": 1 if education == "Unknown" else 0,
+                "city_type_Suburban": 1 if city == "Suburban" else 0,
+                "city_type_Urban": 1 if city == "Urban" else 0,
+                "current_vehicle_type_SUV": 1 if vehicle == "SUV" else 0,
+                "current_vehicle_type_Sedan": 1 if vehicle == "Sedan" else 0,
+                "current_vehicle_type_Truck": 1 if vehicle == "Truck" else 0,
+            }
+            input_df = pd.DataFrame([row])[model.feature_names_]
 
+            pred_idx = int(model.predict(input_df)[0][0])
+            pred_label = CLASS_MAP[pred_idx]
+            proba = model.predict_proba(input_df)[0]
+
+            pool = Pool(input_df)
+            shap_vals = model.get_feature_importance(pool, type="ShapValues")
+            contribs = shap_vals[0][pred_idx][:-1]
+            top_idx = np.argsort(np.abs(contribs))[::-1][:6]
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            with st.container(border=True):
+                r1, r2 = st.columns([1, 1.3])
+
+                with r1:
+                    badge_cls = {"Low": "verdict-low", "Medium": "verdict-medium", "High": "verdict-high"}[pred_label]
+                    st.markdown(f'<div class="verdict-badge {badge_cls}">Adoption Likelihood: {pred_label}</div>', unsafe_allow_html=True)
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    for cls, p in zip(["Low", "Medium", "High"], proba):
+                        st.markdown(f"**{cls}** — {p*100:.1f}%")
+                        st.progress(float(p))
+
+                    # ---- export this prediction ----
+                    export_row = row.copy()
+                    export_row["predicted_likelihood"] = pred_label
+                    export_row["prob_low"], export_row["prob_medium"], export_row["prob_high"] = proba
+                    export_df = pd.DataFrame([export_row])
+                    st.download_button(
+                        "⬇ Export This Prediction (CSV)",
+                        export_df.to_csv(index=False).encode("utf-8"),
+                        "ev_prediction.csv", "text/csv", use_container_width=True
+                    )
+
+                with r2:
+                    st.markdown("**Top factors driving this prediction**")
+                    fig = go.Figure(go.Bar(
+                        x=[contribs[i] for i in top_idx][::-1],
+                        y=[model.feature_names_[i].replace("_", " ").title() for i in top_idx][::-1],
+                        orientation="h",
+                        marker_color=[MINT if contribs[i] > 0 else ORANGE for i in top_idx][::-1],
+                    ))
+                    fig = chart_layout(fig, height=280, xaxis_title="SHAP contribution (→ pushes toward predicted class)")
+                    st.plotly_chart(fig, use_container_width=True, key="pred_shap_bar")
+
+                    # ---- percentile context for top factors that map to real columns ----
+                    with st.expander("See where these values sit vs. all respondents"):
+                        for i in top_idx[:4]:
+                            fname = model.feature_names_[i]
+                            if fname in row and fname in df.columns:
+                                pct = (df[fname] < row[fname]).mean() * 100
+                                st.markdown(f"- **{fname.replace('_',' ').title()}** ({row[fname]:.2f}) is higher than **{pct:.0f}%** of respondents")
+
+            # ---- sensitivity: "what would change this prediction" ----
+            LEVERS = {
+                "ev_knowledge_score": ("ev_knowledge_score", +2, 1, 10),
+                "range_anxiety_score": ("range_anxiety_score", -2, 1, 10),
+                "environmental_awareness_score": ("environmental_awareness_score", +2, 1, 10),
+                "technology_affinity_score": ("technology_affinity_score", +2, 1, 10),
+                "government_incentive_awareness": ("government_incentive_awareness", +2, 1, 10),
+                "charging_station_accessibility": ("charging_station_accessibility", +2, 1, 10),
+                "battery_replacement_concern": ("battery_replacement_concern", -2, 1, 10),
+                "anxiety_minus_knowledge": ("ev_knowledge_score", +2, 1, 10),
+                "awareness_composite": ("environmental_awareness_score", +2, 1, 10),
+            }
+            negative_idx = [i for i in top_idx if contribs[i] < 0]
+            suggestions = []
+            for i in negative_idx[:2]:
+                fname = model.feature_names_[i]
+                if fname in LEVERS:
+                    raw_field, delta, lo, hi = LEVERS[fname]
+                    new_val = int(np.clip(row.get(raw_field, ev_knowledge) + delta, lo, hi))
+                    sim_inputs = dict(
+                        income=income, fuel_expense=fuel_expense, charging_cost=charging_cost, energy_kwh=energy_kwh,
+                        daily_commute=daily_commute, weekly_travel=weekly_travel, education=education, city=city,
+                        vehicle=vehicle, env_awareness=env_awareness, tech_affinity=tech_affinity,
+                        gov_awareness=gov_awareness, range_anxiety=range_anxiety, battery_concern=battery_concern,
+                        ev_knowledge=ev_knowledge, charging_access=charging_access, nearest_km=nearest_km,
+                        home_charging=home_charging, prev_experience=prev_experience,
+                    )
+                    field_to_var = {
+                        "ev_knowledge_score": "ev_knowledge", "range_anxiety_score": "range_anxiety",
+                        "environmental_awareness_score": "env_awareness", "technology_affinity_score": "tech_affinity",
+                        "government_incentive_awareness": "gov_awareness",
+                        "charging_station_accessibility": "charging_access",
+                        "battery_replacement_concern": "battery_concern",
+                    }
+                    sim_inputs[field_to_var[raw_field]] = new_val
+                    sim_row = row.copy()
+                    sim_row[raw_field] = new_val
+                    sim_row["anxiety_minus_knowledge"] = sim_inputs["range_anxiety"] - sim_inputs["ev_knowledge"]
+                    sim_row["awareness_composite"] = np.mean(
+                        [sim_inputs["env_awareness"], sim_inputs["tech_affinity"], sim_inputs["gov_awareness"]]
+                    )
+                    sim_df = pd.DataFrame([sim_row])[model.feature_names_]
+                    sim_pred = CLASS_MAP[int(model.predict(sim_df)[0][0])]
+                    if sim_pred != pred_label:
+                        suggestions.append(
+                            f"If **{raw_field.replace('_',' ')}** moved from {row.get(raw_field)} to **{new_val}**, "
+                            f"the prediction would likely shift from **{pred_label} → {sim_pred}**."
+                        )
+                    else:
+                        suggestions.append(
+                            f"Even raising **{raw_field.replace('_',' ')}** to {new_val} keeps the prediction at **{pred_label}** — not the deciding factor alone."
+                        )
+
+            if suggestions:
+                st.markdown("**What would change this prediction**")
+                for s in suggestions:
+                    st.markdown(f"- {s}")
+
+            # ---- prediction history ----
+            if "pred_history" not in st.session_state:
+                st.session_state.pred_history = []
+            st.session_state.pred_history.append({
+                "Income": income, "Knowledge": ev_knowledge, "Anxiety": range_anxiety,
+                "Awareness (env)": env_awareness, "Charging Access": charging_access,
+                "Prediction": pred_label, "P(High)": f"{proba[2]*100:.1f}%"
+            })
+            st.session_state.pred_history = st.session_state.pred_history[-5:]
+
+        except Exception as e:
+            st.error(f"Something went wrong computing this prediction: {e}")
+
+    if st.session_state.get("pred_history"):
         st.markdown("<br>", unsafe_allow_html=True)
         with st.container(border=True):
-            r1, r2 = st.columns([1, 1.3])
-            with r1:
-                badge_cls = {"Low": "verdict-low", "Medium": "verdict-medium", "High": "verdict-high"}[pred_label]
-                st.markdown(f'<div class="verdict-badge {badge_cls}">Adoption Likelihood: {pred_label}</div>', unsafe_allow_html=True)
-                st.markdown("<br>", unsafe_allow_html=True)
-                for cls, p in zip(["Low", "Medium", "High"], proba):
-                    st.markdown(f"**{cls}** — {p*100:.1f}%")
-                    st.progress(float(p))
-            with r2:
-                st.markdown("**Top factors driving this prediction**")
-                pool = Pool(input_df)
-                shap_vals = model.get_feature_importance(pool, type="ShapValues")
-                contribs = shap_vals[0][pred_idx][:-1]
-                top_idx = np.argsort(np.abs(contribs))[::-1][:5]
-                for i in top_idx:
-                    fname = model.feature_names_[i]
-                    val = contribs[i]
-                    direction = "pos" if val > 0 else "negimpact"
-                    row_cls = "" if val > 0 else "neg"
-                    arrow = "▲ pushes toward" if val > 0 else "▼ pushes away from"
-                    st.markdown(
-                        f"""<div class="factor-row {row_cls}">
-                        <span class="factor-name">{fname.replace('_',' ').title()}</span>
-                        <span class="factor-impact {direction}">{arrow} {pred_label} ({val:+.2f})</span>
-                        </div>""", unsafe_allow_html=True
-                    )
+            st.markdown('<div class="chart-card-title">Recent Predictions (this session)</div>', unsafe_allow_html=True)
+            st.dataframe(pd.DataFrame(st.session_state.pred_history), use_container_width=True, hide_index=True)
+            if st.button("🗑 Clear History"):
+                st.session_state.pred_history = []
+                st.rerun()
 
 # ==================================================================
 # PAGE 7: AI ASSISTANT
