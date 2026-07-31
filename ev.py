@@ -531,13 +531,65 @@ with tab_charge:
         c3, c4 = st.columns(2)
         with c3:
             with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Distance to Nearest Charger</div>', unsafe_allow_html=True)
-                tmp = fdf["Distance_Band"].value_counts().reindex(["<2 km", "2-5 km", "5-10 km", "10+ km"]).reset_index()
-                tmp.columns = ["Distance", "Count"]
-                fig = px.bar(tmp, x="Distance", y="Count", text="Count", color_discrete_sequence=[MINT], template=PLOT_TEMPLATE)
-                fig.update_traces(textposition="outside")
-                fig = chart_layout(fig)
-                st.plotly_chart(fig, use_container_width=True, key="charge_distance_band")
+                st.markdown(
+                '<div class="chart-card-title">Distance to Nearest Charger vs EV Adoption</div>',
+                unsafe_allow_html=True,
+        )
+
+        # High adoption rate by distance
+                tmp = (
+                fdf.groupby("Distance_Band")["ev_adoption_likelihood"]
+                .apply(lambda x: (x == "High").mean() * 100)
+                .reindex(["<2 km", "2-5 km", "5-10 km", "10+ km"])
+                .reset_index()
+        )
+
+                tmp.columns = ["Distance", "High Adoption"]
+
+                fig = go.Figure()
+
+        # Bar chart
+                fig.add_trace(
+                go.Bar(
+                    x=tmp["Distance"],
+                    y=tmp["High Adoption"],
+                    name="Adoption Rate",
+                    marker_color=MINT,
+                    text=[f"{v:.1f}%" for v in tmp["High Adoption"]],
+                    textposition="outside",
+            )
+        )
+
+        # Trend line
+                fig.add_trace(
+                go.Scatter(
+                    x=tmp["Distance"],
+                    y=tmp["High Adoption"],
+                    mode="lines+markers",
+                    name="Trend",
+                    line=dict(color=ORANGE, width=4),
+                    marker=dict(size=10, color=ORANGE),
+            )
+        )
+
+                fig = chart_layout(
+                fig,
+                xaxis_title="Distance to Nearest Charger",
+                yaxis_title="High EV Adoption (%)",
+        )
+
+                fig.update_layout(
+                showlegend=False,
+                yaxis_range=[0, 80]
+        )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+                st.caption(
+                "EV adoption decreases as the distance to the nearest charging station increases, "
+                "suggesting that expanding charging infrastructure closer to residential areas "
+                "could improve EV adoption."
+        )
         with c4:
             with st.container(border=True):
                 st.markdown('<div class="chart-card-title">Charging Cost vs Energy Consumption</div>', unsafe_allow_html=True)
