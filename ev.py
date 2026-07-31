@@ -11,7 +11,7 @@ from openai import OpenAI
 # PAGE CONFIG
 # ------------------------------------------------------------------
 st.set_page_config(
-    page_title="EV Adoption Intelligence",
+    page_title="EV Adoption Analysis",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -123,11 +123,12 @@ st.markdown(f"""
     }}
 
     .metric-card {{
-        position: relative; background: {CARD_GLASS}; backdrop-filter: blur(14px);
-        border: 1px solid {BORDER_MINT}; border-left: 4px solid {MINT}; border-radius: 20px;
-        padding: 18px 20px; min-height: 118px; box-shadow: 0 8px 28px rgba(0,0,0,0.5);
-        transition: transform 0.25s ease, box-shadow 0.25s ease;
-    }}
+    position: relative; background: {CARD_GLASS}; backdrop-filter: blur(14px);
+    border: 1px solid {BORDER_MINT}; border-left: 4px solid {MINT}; border-radius: 20px;
+    padding: 18px 20px; height: 150px; box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+    display: flex; flex-direction: column; justify-content: space-between;
+}}
     .metric-card:hover {{ transform: translateY(-5px); box-shadow: 0 16px 40px rgba(82,242,198,0.18), 0 0 0 1px {BORDER_MINT}; }}
     .metric-icon {{ font-size: 1.2rem; margin-bottom: 6px; color: {MINT}; font-weight: 900; }}
     .metric-icon.neg {{ color: {ORANGE}; }}
@@ -487,14 +488,28 @@ with tab_charge:
         c1, c2 = st.columns(2)
         with c1:
             with st.container(border=True):
-                st.markdown('<div class="chart-card-title">Home Charging Available</div>', unsafe_allow_html=True)
-                tmp = fdf["home_charging_available"].map({1: "Yes", 0: "No"}).value_counts().reset_index()
-                tmp.columns = ["Home Charging", "Count"]
-                fig = px.pie(tmp, names="Home Charging", values="Count", hole=0.6,
-                             color="Home Charging", color_discrete_map={"Yes": MINT, "No": ORANGE}, template=PLOT_TEMPLATE)
-                fig.update_traces(textinfo="percent+label")
-                fig = chart_layout(fig, showlegend=False)
-                st.plotly_chart(fig, use_container_width=True, key="charge_home_donut")
+                st.markdown('<div class="chart-card-title">Cost Comparison: Fuel vs. Charging</div>', unsafe_allow_html=True)
+                cost_by_tier = fdf.groupby("ev_adoption_likelihood")[["fuel_expense_per_month", "monthly_charging_cost"]].mean()
+                cost_by_tier = cost_by_tier.reindex(TARGET_ORDER).reset_index()
+                cost_long = cost_by_tier.melt(id_vars="ev_adoption_likelihood", var_name="Cost Type", value_name="Avg Monthly Cost")
+                cost_long["Cost Type"] = cost_long["Cost Type"].map({
+                "fuel_expense_per_month": "Fuel (Gas Car)",
+                "monthly_charging_cost": "Charging (EV)",
+                })
+                fig = px.bar(cost_long, x="ev_adoption_likelihood", y="Avg Monthly Cost", color="Cost Type",
+                     barmode="group", text="Avg Monthly Cost",
+                     color_discrete_map={"Fuel (Gas Car)": ORANGE, "Charging (EV)": MINT},
+                     template=PLOT_TEMPLATE, category_orders={"ev_adoption_likelihood": TARGET_ORDER})
+                fig.update_traces(texttemplate="$%{text:.0f}", textposition="outside")
+                fig.update_layout(xaxis_title="Adoption Likelihood", legend_title="")
+                fig = chart_layout(fig, height=340)
+                st.plotly_chart(fig, use_container_width=True, key="fuel_vs_charging_by_tier")
+
+                fuel_vals = cost_by_tier["fuel_expense_per_month"]
+                charge_vals = cost_by_tier["monthly_charging_cost"]
+                fuel_spread = fuel_vals.max() - fuel_vals.min()
+                charge_spread = charge_vals.max() - charge_vals.min()
+                
         with c2:
             with st.container(border=True):
                 st.markdown('<div class="chart-card-title">Charging Accessibility × Home Charging</div>', unsafe_allow_html=True)
