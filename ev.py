@@ -7,9 +7,6 @@ import joblib
 from catboost import Pool
 from openai import OpenAI
 
-# ------------------------------------------------------------------
-# PAGE CONFIG
-# ------------------------------------------------------------------
 st.set_page_config(
     page_title="EV Adoption Analysis",
     page_icon="⚡",
@@ -17,11 +14,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ------------------------------------------------------------------
-# THEME TOKENS — dark luxury BI: black canvas, neon mint accent
-# (same system as EV Insights v1 — colors pull from Streamlit's own
-# theme in .streamlit/config.toml, this stylesheet layers cards/type on top)
-# ------------------------------------------------------------------
+
 INK = "#0B0B0B"
 CARD_GLASS = "rgba(255,255,255,0.035)"
 CARD_SOLID = "#111417"
@@ -193,9 +186,9 @@ TARGET = "ev_adoption_likelihood"
 TARGET_ORDER = ["Low", "Medium", "High"]
 TARGET_COLORS = {"Low": GRAY_MID, "Medium": MINT_DIM, "High": MINT}
 
-# ------------------------------------------------------------------
+
 # DATA + MODEL
-# ------------------------------------------------------------------
+
 @st.cache_data
 def load_data():
     df = pd.read_csv("global_ev_adoption_behavior_2026.csv")
@@ -307,9 +300,9 @@ def page_header(title, subtitle, model_page=False):
             unsafe_allow_html=True,
         )
 
-# ------------------------------------------------------------------
+
 # SIDEBAR — lean filter set, business pages only
-# ------------------------------------------------------------------
+
 with st.sidebar:
     st.markdown("### ⚙ Filters")
     st.caption("Apply to Home, Demographics, Charging & EV Insights only — not to Feature Importance or Prediction.")
@@ -337,9 +330,8 @@ fdf = df[
     & df["Income_Bracket"].isin(income_range)
 ]
 
-# ------------------------------------------------------------------
 # NAVBAR
-# ------------------------------------------------------------------
+
 st.markdown(f"""
 <div class="navbar">
     <div class="navbar-brand">⚡ EV Adoption<span> Analysis</span></div>
@@ -352,9 +344,9 @@ tab_home, tab_demo, tab_charge, tab_insights, tab_importance, tab_predict, tab_a
     "🚗 EV Insights", "🧠 Feature Importance", "🤖 Prediction", "💬 AI Assistant"
 ])
 
-# ==================================================================
+
 # PAGE 1: HOME
-# ==================================================================
+
 with tab_home:
     page_header("Executive Overview", "The state of EV adoption across your surveyed population, at a glance.")
 
@@ -445,9 +437,9 @@ with tab_home:
                 st.caption(
             "The Anxiety−Knowledge gap shows the widest split of any single factor."
         )
-# ==================================================================
+
 # PAGE 2: DEMOGRAPHICS
-# ==================================================================
+
 with tab_demo:
     page_header("Buyer Demographics", "Which demographic cuts predict adoption — and which ones you can stop targeting.")
 
@@ -463,11 +455,13 @@ with tab_demo:
                 fig = px.line(tmp, x="Income Bracket", y="% High Adoption", markers=True,
                       text="% High Adoption", color_discrete_sequence=[MINT], template=PLOT_TEMPLATE)
                 fig.update_traces(texttemplate="%{text:.1f}%", textposition="top center",
-                           line=dict(width=3), marker=dict(size=9),
+                           line=dict(width=3), marker=dict(size=9), cliponaxis=False,
                            fill="tozeroy", fillcolor="rgba(82,242,198,0.15)")
                 fig.update_yaxes(range=[0, 100])
+                fig.update_layout(margin=dict(t=40, b=10, l=10, r=20))
                 fig = chart_layout(fig)
-                st.plotly_chart(fig, use_container_width=True, key="demo_income_rate")
+                st.plotly_chart(fig, use_container_width=True, key="demo_income_rate",
+                         config={"displayModeBar": False})
                 st.caption("32% → 90% across brackets — your strongest demographic lever, by a wide margin.")
         with c2:
             adoption_rate_by_band(
@@ -479,9 +473,9 @@ with tab_demo:
                 )
 
         
-# ==================================================================
+
 # PAGE 3: CHARGING INFRASTRUCTURE
-# ==================================================================
+
 with tab_charge:
     page_header("Charging Infrastructure", "How charging access and cost shape adoption.")
 
@@ -608,9 +602,9 @@ with tab_charge:
 "electricity prices vary across regions."
 )
 
-# ==================================================================
+
 # PAGE 4: EV INSIGHTS
-# ==================================================================
+
 with tab_insights:
     page_header("Adoption Drivers", "Why people adopt — and why they don't.")
 
@@ -621,10 +615,10 @@ with tab_insights:
             df_m["Anxiety"] = pd.cut(df_m["range_anxiety_score"], [0, 3, 7, 10], labels=["Low", "Medium", "High"], include_lowest=True)
             df_m["Knowledge"] = pd.cut(df_m["ev_knowledge_score"], [0, 3, 7, 10], labels=["Low", "Medium", "High"], include_lowest=True)
             matrix = df_m.groupby(["Anxiety", "Knowledge"], observed=True)["ev_adoption_likelihood"].apply(
-                lambda s: (s == "High").mean() * 100
-            ).unstack().reindex(index=["High", "Medium", "Low"], columns=["Low", "Medium", "High"])
+            lambda s: (s == "High").mean() * 100
+            ).unstack().reindex(index=["High", "Medium", "Low"], columns=["Low", "Medium", "High"]).fillna(0)
             fig = px.imshow(matrix, text_auto=".0f", color_continuous_scale=[[0, ORANGE], [0.5, "#15181c"], [1, MINT]],
-                             template=PLOT_TEMPLATE, aspect="auto", labels=dict(color="% High Adoption"))
+                     template=PLOT_TEMPLATE, aspect="auto", labels=dict(color="% High Adoption"))
             fig.update_layout(xaxis_title="EV Knowledge", yaxis_title="Range Anxiety")
             fig = chart_layout(fig, height=340)
             st.plotly_chart(fig, use_container_width=True, key="ins_matrix")
@@ -661,29 +655,11 @@ with tab_insights:
                 st.plotly_chart(fig, use_container_width=True, key="ins_exp_charging")
                 st.caption("The two enablers stack: prior experience plus home charging (69.2%) beats either alone.")
 
-# ==================================================================
-# PAGE 5: FEATURE IMPORTANCE
-# ==================================================================
-with tab_importance:
-    page_header("Feature Importance", "What the trained CatBoost model actually relies on to predict adoption.")
 
-    imp = model.get_feature_importance()
-    imp_df = pd.DataFrame({"Feature": model.feature_names_, "Importance": imp}).sort_values("Importance", ascending=True).tail(15)
 
-    with st.container(border=True):
-        st.markdown('<div class="chart-card-title">Top 15 Features — CatBoost Importance Score</div>', unsafe_allow_html=True)
-        colors = [MINT if i >= len(imp_df) - 3 else MINT_DIM if i >= len(imp_df) - 8 else GRAY_MID for i in range(len(imp_df))]
-        fig = go.Figure(go.Bar(x=imp_df["Importance"], y=imp_df["Feature"], orientation="h", marker_color=colors))
-        fig = chart_layout(fig, height=520, xaxis_title="Importance Score")
-        st.plotly_chart(fig, use_container_width=True, key="feat_importance")
 
-    st.info("💡 The top 4 features — anxiety-vs-knowledge gap, awareness composite, charging accessibility, "
-            "and battery replacement concern — account for roughly two-thirds of the model's total decision weight. "
-            "Everything past the top 10 contributes marginally.")
-
-# ==================================================================
 # PAGE 6: PREDICTION
-# ==================================================================
+
 with tab_predict:
     page_header("EV Adoption Predictor", "Score an individual profile using the live CatBoost model.", model_page=True)
 
@@ -790,9 +766,9 @@ with tab_predict:
                         </div>""", unsafe_allow_html=True
                     )
 
-# ==================================================================
+
 # PAGE 7: AI ASSISTANT
-# ==================================================================
+
 with tab_ai:
     page_header("EV AI Assistant", "Ask anything about EV adoption — answers reflect your current sidebar filters.")
 
