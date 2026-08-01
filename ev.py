@@ -691,34 +691,38 @@ with tab_predict:
         col_a, col_b, col_c = st.columns(3)
 
         with col_a:
-            st.markdown("**Financial**")
+            st.markdown("**Personal & Vehicle**")
             income = st.number_input("Annual Income ($)", min_value=5000, max_value=300000, value=45000, step=1000)
             fuel_expense = st.number_input("Fuel Expense per Month ($)", min_value=0, max_value=1000, value=250)
-            charging_cost = st.number_input("Monthly Charging Cost ($, if EV)", min_value=0, max_value=500, value=40)
-            energy_kwh = st.number_input("Monthly Energy Consumption (kWh, if EV)", min_value=1, max_value=2000, value=300)
-
-        with col_b:
-            st.markdown("**Commute & Vehicle**")
-            daily_commute = st.number_input("Daily Commute (km)", min_value=0, max_value=200, value=30)
-            weekly_travel = st.number_input("Weekly Travel Distance (km)", min_value=1, max_value=1500, value=210)
             education = st.selectbox("Education Level", ["High School", "Bachelor", "Master", "PhD", "Unknown"])
             city = st.selectbox("City Type", ["Rural", "Suburban", "Urban"])
-            vehicle = st.selectbox("Current Vehicle Type", ["Hatchback", "Sedan", "SUV", "Truck"])
+            vehicle = st.selectbox(
+                "Current Vehicle Type",
+                ["None (no current vehicle)", "Hatchback", "Sedan", "SUV", "Truck"],
+            help="Selecting 'None' uses the model's baseline encoding — the training data didn't "
+            "include a true 'no vehicle' case, so this is the closest available approximation."
+)
+            daily_commute = st.number_input("Daily Commute (km)", min_value=0, max_value=200, value=30)
+
+        with col_b:
+            st.markdown("**Charging Setup**")
+            charging_cost = st.number_input("Monthly Charging Cost ($, if EV)", min_value=0, max_value=500, value=40)
+            energy_kwh = st.number_input("Monthly Energy Consumption (kWh, if EV)", min_value=1, max_value=2000, value=300)
+            weekly_travel = st.number_input("Weekly Travel Distance (km)", min_value=1, max_value=1500, value=210)
+            charging_access = st.slider("Charging Station Accessibility", 1, 10, 5)
+            nearest_km = st.number_input("Distance to Nearest Charger (km)", min_value=0.0, max_value=100.0, value=6.0)
+            home_charging = st.selectbox("Home Charging Available", ["Yes", "No"])
+            prev_experience = st.selectbox("Previous EV Experience", ["Yes", "No"])
 
         with col_c:
-            st.markdown("**Awareness & Charging Access**")
+            st.markdown("**Awareness & Concerns**")
             env_awareness = st.slider("Environmental Awareness", 1, 10, 6)
             tech_affinity = st.slider("Technology Affinity", 1, 10, 6)
             gov_awareness = st.slider("Government Incentive Awareness", 1, 10, 6)
             range_anxiety = st.slider("Range Anxiety", 1, 10, 5)
             battery_concern = st.slider("Battery Replacement Concern", 1, 10, 5)
             ev_knowledge = st.slider("EV Knowledge Score", 1, 10, 6)
-            charging_access = st.slider("Charging Station Accessibility", 1, 10, 5)
-            nearest_km = st.number_input("Distance to Nearest Charger (km)", min_value=0.0, max_value=100.0, value=6.0)
-            home_charging = st.selectbox("Home Charging Available", ["Yes", "No"])
-            prev_experience = st.selectbox("Previous EV Experience", ["Yes", "No"])
-
-        submitted = st.form_submit_button("🔮 Predict Adoption Likelihood", use_container_width=True)
+            submitted = st.form_submit_button("🔮 Predict Adoption Likelihood", use_container_width=True)
 
     if submitted:
         row = {
