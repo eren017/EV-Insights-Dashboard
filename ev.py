@@ -339,9 +339,9 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-tab_home, tab_demo, tab_charge, tab_insights, tab_importance, tab_predict, tab_ai = st.tabs([
+tab_home, tab_demo, tab_charge, tab_insights, tab_predict, tab_ai = st.tabs([
     "🏠 Home", "👥 Demographics", "🔌 Charging Infrastructure",
-    "🚗 EV Insights", "🧠 Feature Importance", "🤖 Prediction", "💬 AI Assistant"
+    "🚗 EV Insights", "🤖 Prediction", "💬 AI Assistant"
 ])
 
 
