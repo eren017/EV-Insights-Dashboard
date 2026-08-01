@@ -225,7 +225,7 @@ def load_data():
     df["awareness_composite"] = df[
         ["environmental_awareness_score", "technology_affinity_score", "government_incentive_awareness"]
     ].mean(axis=1)
-    df["anxiety_minus_knowledge"] = df["range_anxiety_score"] - df["ev_knowledge_score"]
+    df["anxiety_minus_knowledge"] = abs(df["range_anxiety_score"] - df["ev_knowledge_score"])
     return df
 
 @st.cache_resource
