@@ -463,7 +463,8 @@ with tab_demo:
                 fig = px.line(tmp, x="Income Bracket", y="% High Adoption", markers=True,
                       text="% High Adoption", color_discrete_sequence=[MINT], template=PLOT_TEMPLATE)
                 fig.update_traces(texttemplate="%{text:.1f}%", textposition="top center",
-                           line=dict(width=3), marker=dict(size=9))
+                           line=dict(width=3), marker=dict(size=9),
+                           fill="tozeroy", fillcolor="rgba(82,242,198,0.15)")
                 fig.update_yaxes(range=[0, 100])
                 fig = chart_layout(fig)
                 st.plotly_chart(fig, use_container_width=True, key="demo_income_rate")
