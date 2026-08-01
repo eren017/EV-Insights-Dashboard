@@ -342,7 +342,7 @@ fdf = df[
 # ------------------------------------------------------------------
 st.markdown(f"""
 <div class="navbar">
-    <div class="navbar-brand">⚡ EV Adoption<span> Intelligence</span></div>
+    <div class="navbar-brand">⚡ EV Adoption<span> Analysis</span></div>
     <div class="navbar-sub">Powered by CatBoost · 50,000 respondents</div>
 </div>
 """, unsafe_allow_html=True)
